@@ -3,6 +3,7 @@ package org.ebookdroid.core;
 import org.ebookdroid.cbdroid.CbrViewerActivity;
 import org.ebookdroid.cbdroid.CbzViewerActivity;
 import org.ebookdroid.djvudroid.DjvuViewerActivity;
+import org.ebookdroid.fb2droid.FB2ViewerActivity;
 import org.ebookdroid.pdfdroid.PdfViewerActivity;
 import org.ebookdroid.xpsdroid.XpsViewerActivity;
 
@@ -23,7 +24,9 @@ public enum Activities {
 
     CBZ(CbzViewerActivity.class, "cbz"),
 
-    CBX(CbrViewerActivity.class, "cbr");
+    CBR(CbrViewerActivity.class, "cbr"),
+    
+    FB2(FB2ViewerActivity.class, "fb2");
 
     private final static Map<String, Class<? extends Activity>> extensionToActivity;
 
