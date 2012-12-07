@@ -1,18 +1,31 @@
 package org.emdev.ui.uimanager;
 
-import org.ebookdroid.common.log.LogContext;
-
 import android.app.Activity;
 import android.view.View;
 
-import org.emdev.utils.android.AndroidVersion;
+import org.emdev.common.android.AndroidVersion;
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
 
 public interface IUIManager {
 
-    LogContext LCTX = LogContext.ROOT.lctx("UIManager");
+    LogContext LCTX = LogManager.root().lctx("UIManager");
 
-    IUIManager instance = AndroidVersion.lessThan3x ? new UIManager1x() : AndroidVersion.is3x ? new UIManager3x()
-            : new UIManager4x();
+    IUIManager instance =
+    /* Check old versions */
+    AndroidVersion.lessThan3x
+    /* UIManager1x */
+    ? new UIManager1x()
+    /* Check Android 3.x versions */
+    : AndroidVersion.is3x
+    /* UIManager3x */
+    ? new UIManager3x()
+    /* Check Android 4.0.x versions */
+    : AndroidVersion.is40x
+    /* UIManager40x */
+    ? new UIManager40x()
+    /* UIManager41x */
+    : new UIManager41x();
 
     void onPause(Activity activity);
 
@@ -22,16 +35,17 @@ public interface IUIManager {
 
     void setFullScreenMode(Activity activity, View view, boolean fullScreen);
 
-    void setTitleVisible(Activity activity, boolean visible);
+    void setTitleVisible(Activity activity, boolean visible, boolean firstTime);
 
-    void setHardwareAccelerationEnabled(boolean enabled);
-
-    void setHardwareAccelerationMode(View view, boolean accelerated);
+    boolean isTitleVisible(Activity activity);
 
     void openOptionsMenu(final Activity activity, final View view);
+
+    void invalidateOptionsMenu(final Activity activity);
 
     void onMenuOpened(Activity activity);
 
     void onMenuClosed(Activity activity);
 
+    boolean isTabletUi(final Activity activity);
 }

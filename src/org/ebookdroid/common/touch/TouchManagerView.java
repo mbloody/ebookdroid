@@ -1,7 +1,6 @@
 package org.ebookdroid.common.touch;
 
 import org.ebookdroid.R;
-import org.ebookdroid.common.log.LogContext;
 import org.ebookdroid.common.touch.TouchManager.Region;
 import org.ebookdroid.common.touch.TouchManager.TouchProfile;
 import org.ebookdroid.ui.viewer.IActivityController;
@@ -18,12 +17,14 @@ import android.view.View;
 
 import java.util.ListIterator;
 
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
 import org.emdev.ui.actions.ActionController;
 import org.emdev.utils.MathUtils;
 
 public class TouchManagerView extends View {
 
-    private static final LogContext LCTX = LogContext.ROOT.lctx("TouchManagerView");
+    private static final LogContext LCTX = LogManager.root().lctx("TouchManagerView");
 
     private static final float GRID_X = 10;
     private static final float GRID_Y = 10;
@@ -87,10 +88,7 @@ public class TouchManagerView extends View {
         final float yStep = height / GRID_Y;
 
         int cIndex = 0;
-        final ListIterator<Region> regions = profile.regions();
-        while (regions.hasNext()) {
-            regions.next();
-        }
+        ListIterator<Region> regions = profile.regions(false);
         while (regions.hasPrevious()) {
             final Region region = regions.previous();
             final RectF r = region.getActualRect(width, height);
@@ -105,9 +103,7 @@ public class TouchManagerView extends View {
         drawGrid(canvas, xStep, yStep);
 
         cIndex = 0;
-        while (regions.hasNext()) {
-            regions.next();
-        }
+        regions = profile.regions(false);
         while (regions.hasPrevious()) {
             final Region region = regions.previous();
             final RectF r = region.getActualRect(width, height);

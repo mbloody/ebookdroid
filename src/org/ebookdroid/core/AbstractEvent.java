@@ -1,22 +1,26 @@
 package org.ebookdroid.core;
 
-import org.ebookdroid.common.bitmaps.BitmapManager;
-import org.ebookdroid.common.bitmaps.Bitmaps;
-import org.ebookdroid.common.log.LogContext;
+import org.ebookdroid.common.bitmaps.GLBitmaps;
+import org.ebookdroid.common.bitmaps.ByteBufferManager;
+
+import android.graphics.RectF;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
+
 public abstract class AbstractEvent implements IEvent {
 
-    public final LogContext LCTX = LogContext.ROOT.lctx(getClass().getSimpleName());
+    public final LogContext LCTX = LogManager.root().lctx(getClass().getSimpleName(), false);
 
     protected final List<PageTreeNode> nodesToDecode = new ArrayList<PageTreeNode>();
-    protected final List<Bitmaps> bitmapsToRecycle = new ArrayList<Bitmaps>();
+    protected final List<GLBitmaps> bitmapsToRecycle = new ArrayList<GLBitmaps>();
 
     public AbstractViewController ctrl;
-    public ViewState viewState;
+    protected ViewState viewState;
 
     protected AbstractEvent() {
     }
@@ -28,7 +32,7 @@ public abstract class AbstractEvent implements IEvent {
      */
     @Override
     public ViewState process() {
-        viewState = calculatePageVisibility(viewState);
+        calculatePageVisibility();
 
         ctrl.firstVisiblePage = viewState.pages.firstVisible;
         ctrl.lastVisiblePage = viewState.pages.lastVisible;
@@ -37,7 +41,7 @@ public abstract class AbstractEvent implements IEvent {
             process(page);
         }
 
-        BitmapManager.release(bitmapsToRecycle);
+        ByteBufferManager.release(bitmapsToRecycle);
 
         if (!nodesToDecode.isEmpty()) {
             ctrl.base.getDecodingProgressModel().increase(nodesToDecode.size());
@@ -79,11 +83,12 @@ public abstract class AbstractEvent implements IEvent {
         return nodes.process(this, level, true);
     }
 
-    protected ViewState calculatePageVisibility(final ViewState initial) {
+    protected void calculatePageVisibility() {
         int firstVisiblePage = -1;
         int lastVisiblePage = -1;
+        final RectF bounds = new RectF();
         for (final Page page : ctrl.model.getPages()) {
-            if (ctrl.isPageVisible(page, initial)) {
+            if (ctrl.isPageVisible(page, viewState, bounds)) {
                 if (firstVisiblePage == -1) {
                     firstVisiblePage = page.index.viewIndex;
                 }
@@ -92,7 +97,7 @@ public abstract class AbstractEvent implements IEvent {
                 break;
             }
         }
-        return new ViewState(initial, firstVisiblePage, lastVisiblePage);
+        viewState.update(firstVisiblePage, lastVisiblePage);
     }
 
     protected final void decodePageTreeNodes(final ViewState viewState, final List<PageTreeNode> nodesToDecode) {

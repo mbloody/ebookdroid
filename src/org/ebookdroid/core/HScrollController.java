@@ -1,10 +1,10 @@
 package org.ebookdroid.core;
 
 import org.ebookdroid.common.settings.AppSettings;
-import org.ebookdroid.common.settings.SettingsManager;
 import org.ebookdroid.common.settings.books.BookSettings;
 import org.ebookdroid.common.settings.types.DocumentViewMode;
 import org.ebookdroid.common.settings.types.PageAlign;
+import org.ebookdroid.core.models.DocumentModel.PageIterator;
 import org.ebookdroid.ui.viewer.IActivityController;
 
 import android.graphics.Rect;
@@ -18,7 +18,7 @@ public class HScrollController extends AbstractScrollController {
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#calculateCurrentPage(org.ebookdroid.core.ViewState)
      */
     @Override
@@ -28,17 +28,21 @@ public class HScrollController extends AbstractScrollController {
 
         final int viewX = Math.round(viewState.viewRect.centerX());
 
-        final Iterable<Page> pages = firstVisible != -1 ? viewState.model.getPages(firstVisible, lastVisible + 1)
+        final PageIterator pages = firstVisible != -1 ? viewState.model.getPages(firstVisible, lastVisible + 1)
                 : viewState.model.getPages(0);
-
-        for (final Page page : pages) {
-            final RectF bounds = viewState.getBounds(page);
-            final int pageX = Math.round(bounds.centerX());
-            final long dist = Math.abs(pageX - viewX);
-            if (dist < bestDistance) {
-                bestDistance = dist;
-                result = page.index.viewIndex;
+        try {
+            final RectF bounds = new RectF();
+            for (final Page page : pages) {
+                viewState.getBounds(page, bounds);
+                final int pageX = Math.round(bounds.centerX());
+                final long dist = Math.abs(pageX - viewX);
+                if (dist < bestDistance) {
+                    bestDistance = dist;
+                    result = page.index.viewIndex;
+                }
             }
+        } finally {
+            pages.release();
         }
 
         return result;
@@ -46,12 +50,12 @@ public class HScrollController extends AbstractScrollController {
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#verticalConfigScroll(int)
      */
     @Override
     public final void verticalConfigScroll(final int direction) {
-        final AppSettings app = SettingsManager.getAppSettings();
+        final AppSettings app = AppSettings.current();
         final int dx = (int) (direction * getWidth() * (app.scrollHeight / 100.0));
 
         if (app.animateScrolling) {
@@ -63,7 +67,7 @@ public class HScrollController extends AbstractScrollController {
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#getScrollLimits()
      */
     @Override
@@ -81,7 +85,7 @@ public class HScrollController extends AbstractScrollController {
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#invalidatePageSizes(org.ebookdroid.ui.viewer.IViewController.InvalidateSizeReason,
      *      org.ebookdroid.core.Page)
      */
@@ -97,7 +101,7 @@ public class HScrollController extends AbstractScrollController {
 
         final int height = getHeight();
         final int width = getWidth();
-        final BookSettings bookSettings = SettingsManager.getBookSettings();
+        final BookSettings bookSettings = base.getBookSettings();
         final PageAlign pageAlign = DocumentViewMode.getPageAlign(bookSettings);
 
         if (changedPage == null) {
@@ -110,11 +114,16 @@ public class HScrollController extends AbstractScrollController {
             }
         } else {
             float widthAccum = changedPage.getBounds(1.0f).left;
-            for (final Page page : model.getPages(changedPage.index.viewIndex)) {
-                final RectF pageBounds = calcPageBounds(pageAlign, page.getAspectRatio(), width, height);
-                pageBounds.offset(widthAccum, 0);
-                page.setBounds(pageBounds);
-                widthAccum += pageBounds.width() + 3;
+            final PageIterator pages = model.getPages(changedPage.index.viewIndex);
+            try {
+                for (final Page page : pages) {
+                    final RectF pageBounds = calcPageBounds(pageAlign, page.getAspectRatio(), width, height);
+                    pageBounds.offset(widthAccum, 0);
+                    page.setBounds(pageBounds);
+                    widthAccum += pageBounds.width() + 3;
+                }
+            } finally {
+                pages.release();
             }
         }
     }

@@ -1,7 +1,7 @@
 package org.ebookdroid.core;
 
-import org.ebookdroid.common.bitmaps.BitmapManager;
-import org.ebookdroid.common.bitmaps.Bitmaps;
+import org.ebookdroid.common.bitmaps.GLBitmaps;
+import org.ebookdroid.common.bitmaps.ByteBufferManager;
 import org.ebookdroid.ui.viewer.IViewController.InvalidateSizeReason;
 
 import android.graphics.RectF;
@@ -23,7 +23,7 @@ public class EventReset extends AbstractEvent {
     }
 
     void init(final AbstractViewController ctrl, final InvalidateSizeReason reason, final boolean clearPages) {
-        this.viewState = new ViewState(ctrl);
+        this.viewState = ViewState.get(ctrl);
         this.ctrl = ctrl;
         this.level = PageTreeLevel.getLevel(viewState.zoom);
         this.reason = reason;
@@ -42,23 +42,23 @@ public class EventReset extends AbstractEvent {
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.core.AbstractEvent#process()
      */
     @Override
     public ViewState process() {
         try {
             if (clearPages) {
-                final List<Bitmaps> bitmapsToRecycle = new ArrayList<Bitmaps>();
+                final List<GLBitmaps> bitmapsToRecycle = new ArrayList<GLBitmaps>();
                 for (final Page page : ctrl.model.getPages()) {
                     page.nodes.recycleAll(bitmapsToRecycle, true);
                 }
-                BitmapManager.release(bitmapsToRecycle);
+                ByteBufferManager.release(bitmapsToRecycle);
             }
             if (reason != null) {
                 ctrl.invalidatePageSizes(reason, null);
                 ctrl.invalidateScroll();
-                viewState = new ViewState(ctrl);
+                viewState.update();
             }
             return super.process();
         } finally {
@@ -68,7 +68,7 @@ public class EventReset extends AbstractEvent {
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.core.IEvent#process(org.ebookdroid.core.ViewState, org.ebookdroid.core.PageTree)
      */
     @Override
@@ -78,7 +78,7 @@ public class EventReset extends AbstractEvent {
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.core.IEvent#process(org.ebookdroid.core.ViewState, org.ebookdroid.core.PageTreeNode)
      */
     @Override

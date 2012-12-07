@@ -1,16 +1,18 @@
 package org.ebookdroid.common.touch;
 
-import org.ebookdroid.common.log.LogContext;
 
 import android.annotation.TargetApi;
 import android.graphics.PointF;
 import android.util.FloatMath;
 import android.view.MotionEvent;
 
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
+
 @TargetApi(5)
 public class MultiTouchGestureDetector implements IGestureDetector {
 
-    protected static final LogContext LCTX = LogContext.ROOT.lctx("Gesture", false);
+    protected static final LogContext LCTX = LogManager.root().lctx("Gesture", false);
 
     private final IMultiTouchListener listener;
     private float twoFingerDistance;
@@ -41,9 +43,11 @@ public class MultiTouchGestureDetector implements IGestureDetector {
 
             switch (ev.getPointerCount()) {
                 case 2:
-                    twoFingerDistance = getTwoFingerDistance(ev);
-                    twoFingerPress = true;
-                    twoFingerMove = false;
+                    if (getTwoFingerDistance(ev) > 25){
+                        twoFingerDistance = getTwoFingerDistance(ev);
+                        twoFingerPress = true;
+                        twoFingerMove = false;
+                    }
                     break;
                 default:
                     twoFingerPress = false;
@@ -109,7 +113,7 @@ public class MultiTouchGestureDetector implements IGestureDetector {
             }
 
             if (twoFingerPress && ev.getPointerCount() < 2) {
-                System.out.println("MultiTouchGestureDetector.onTouchEvent(): up pointer");
+                // System.out.println("MultiTouchGestureDetector.onTouchEvent(): up pointer");
                 if (twoFingerMove) {
                     listener.onTwoFingerPinchEnd(calculateCenterEvent(ev));
                 } else {

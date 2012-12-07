@@ -1,16 +1,23 @@
 package org.ebookdroid.ui.settings;
 
-import org.ebookdroid.common.settings.AppPreferences;
-import org.ebookdroid.common.settings.SettingsManager;
+import org.ebookdroid.common.cache.CacheManager;
+import org.ebookdroid.common.settings.AppSettings;
 import org.ebookdroid.common.settings.books.BookSettings;
+import org.ebookdroid.common.settings.definitions.AppPreferences;
+import org.ebookdroid.common.settings.definitions.BookPreferences;
+import org.ebookdroid.common.settings.definitions.LibPreferences;
+import org.ebookdroid.common.settings.definitions.OpdsPreferences;
+import org.ebookdroid.common.settings.types.CacheLocation;
 import org.ebookdroid.common.settings.types.DocumentViewMode;
 import org.ebookdroid.common.settings.types.PageAlign;
 import org.ebookdroid.core.curl.PageAnimationType;
 
+import android.app.Activity;
 import android.preference.EditTextPreference;
 import android.preference.ListPreference;
 import android.preference.Preference;
 import android.preference.Preference.OnPreferenceChangeListener;
+import android.preference.PreferenceGroup;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -18,15 +25,18 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+import org.emdev.common.android.AndroidVersion;
 import org.emdev.ui.preference.SeekBarPreference;
+import org.emdev.ui.uimanager.IUIManager;
 import org.emdev.utils.LengthUtils;
 import org.emdev.utils.enums.EnumUtils;
 
 /**
  * @author whippet
- * 
+ *
  */
-public class PreferencesDecorator implements IPreferenceContainer, AppPreferences {
+public class PreferencesDecorator implements IPreferenceContainer, AppPreferences, BookPreferences, LibPreferences,
+        OpdsPreferences {
 
     private final Map<String, CharSequence> summaries = new HashMap<String, CharSequence>();
 
@@ -43,53 +53,72 @@ public class PreferencesDecorator implements IPreferenceContainer, AppPreference
         return parent.findPreference(key);
     }
 
+    @Override
+    public Preference getRoot() {
+        return parent.getRoot();
+    }
+
+    @Override
+    public Activity getActivity() {
+        return parent.getActivity();
+    }
+
     public void decorateSettings() {
-        decorateBooksSettings();
+        decoratePreference(getRoot());
         decorateBrowserSettings();
-        decorateMemorySettings();
+        decorateOpdsSettings();
+        decoratePerformanceSettings();
         decorateRenderSettings();
+        decorateTypeSpecificSettings();
         decorateScrollSettings();
         decorateUISettings();
     }
 
-    public void decorateBooksSettings() {
-        decoratePreferences(BOOK_CONTRAST.key, BOOK_EXPOSURE.key);
-        decoratePreferences(BOOK_VIEW_MODE.key, BOOK_PAGE_ALIGN.key, BOOK_ANIMATION_TYPE.key);
+    public void decorateBooksSettings(final BookSettings bs) {
         addViewModeListener(BOOK_VIEW_MODE.key, BOOK_PAGE_ALIGN.key, BOOK_ANIMATION_TYPE.key);
         addAnimationTypeListener(BOOK_ANIMATION_TYPE.key, BOOK_PAGE_ALIGN.key);
 
-        BookSettings bs = SettingsManager.getBookSettings();
-        if (bs != null) {
-            enableSinglePageModeSetting(bs.viewMode, BOOK_PAGE_ALIGN.key, BOOK_ANIMATION_TYPE.key);
-        }
+        enableSinglePageModeSetting(bs.viewMode, BOOK_PAGE_ALIGN.key, BOOK_ANIMATION_TYPE.key);
     }
 
     public void decorateBrowserSettings() {
-        decoratePreferences(AUTO_SCAN_DIRS.key);
+        final boolean isTablet = IUIManager.instance.isTabletUi(parent.getActivity()) && !AndroidVersion.lessThan3x;
+        enableSettings(isTablet, SHOW_REMOVABLE_MEDIA.key, SHOW_SCANNING_MEDIA.key);
+
+        addListener(CACHE_LOCATION.key, new OnPreferenceChangeListener() {
+
+            @Override
+            public boolean onPreferenceChange(final Preference preference, final Object newValue) {
+                final CacheLocation newLocation = EnumUtils.getByResValue(CacheLocation.class,
+                        LengthUtils.toString(newValue), null);
+                if (newLocation != null) {
+                    CacheManager.moveCacheLocation(preference.getContext(), newLocation);
+                }
+                return true;
+            }
+        });
     }
 
-    public void decorateMemorySettings() {
-        decoratePreferences(PAGES_IN_MEMORY.key, VIEW_TYPE.key, DECODE_THREAD_PRIORITY.key, DRAW_THREAD_PRIORITY.key,
-                BITMAP_SIZE.key);
+    public void decorateOpdsSettings() {
+    }
+
+    public void decoratePerformanceSettings() {
     }
 
     public void decorateRenderSettings() {
-        decoratePreferences(CONTRAST.key, EXPOSURE.key);
-        decoratePreferences(VIEW_MODE.key, PAGE_ALIGN.key, ANIMATION_TYPE.key);
         addViewModeListener(VIEW_MODE.key, PAGE_ALIGN.key, ANIMATION_TYPE.key);
         addAnimationTypeListener(ANIMATION_TYPE.key, PAGE_ALIGN.key);
 
-        enableSinglePageModeSetting(SettingsManager.getAppSettings().viewMode, PAGE_ALIGN.key, ANIMATION_TYPE.key);
+        enableSinglePageModeSetting(AppSettings.current().viewMode, PAGE_ALIGN.key, ANIMATION_TYPE.key);
+    }
 
-        decoratePreferences(DJVU_RENDERING_MODE.key, PDF_CUSTOM_XDPI.key, PDF_CUSTOM_YDPI.key, FB2_FONT_SIZE.key);
+    public void decorateTypeSpecificSettings() {
     }
 
     public void decorateScrollSettings() {
-        decoratePreferences(SCROLL_HEIGHT.key, TOUCH_DELAY.key);
     }
 
     public void decorateUISettings() {
-        decoratePreferences(ROTATION.key, BRIGHTNESS.key, PAGE_NUMBER_TOAST_POSITION.key, ZOOM_TOAST_POSITION.key);
     }
 
     public void setPageAlign(final PageAnimationType type, final String alignPrefKey) {
@@ -101,10 +130,14 @@ public class PreferencesDecorator implements IPreferenceContainer, AppPreference
     }
 
     public void enableSinglePageModeSetting(final DocumentViewMode type, final String... relatedKeys) {
+        enableSettings(type == DocumentViewMode.SINGLE_PAGE, relatedKeys);
+    }
+
+    public void enableSettings(final boolean enabled, final String... relatedKeys) {
         for (final String relatedKey : relatedKeys) {
             final Preference pref = findPreference(relatedKey);
             if (pref != null) {
-                pref.setEnabled(type == DocumentViewMode.SINGLE_PAGE);
+                pref.setEnabled(enabled);
             }
         }
     }
@@ -115,13 +148,18 @@ public class PreferencesDecorator implements IPreferenceContainer, AppPreference
         }
     }
 
-    protected void decoratePreference(final Preference pref) {
+    public void decoratePreference(final Preference pref) {
         if (pref instanceof ListPreference) {
             decorateListPreference((ListPreference) pref);
         } else if (pref instanceof EditTextPreference) {
             decorateEditPreference((EditTextPreference) pref);
         } else if (pref instanceof SeekBarPreference) {
             decorateSeekPreference((SeekBarPreference) pref);
+        } else if (pref instanceof PreferenceGroup) {
+            final PreferenceGroup group = (PreferenceGroup) pref;
+            for (int i = 0, n = group.getPreferenceCount(); i < n; i++) {
+                decoratePreference(group.getPreference(i));
+            }
         }
     }
 
@@ -265,4 +303,5 @@ public class PreferencesDecorator implements IPreferenceContainer, AppPreference
             return true;
         }
     }
+
 }

@@ -2,7 +2,7 @@ package org.ebookdroid.core.codec;
 
 import android.graphics.Bitmap;
 
-public interface CodecContext {
+public interface CodecContext extends CodecFeatures {
 
     /**
      * Open appropriate document
@@ -29,8 +29,6 @@ public interface CodecContext {
      * @return <code>true</code> if instance has been recycled
      */
     boolean isRecycled();
-
-    boolean isPageSizeCacheable();
 
     Bitmap.Config getBitmapConfig();
 }

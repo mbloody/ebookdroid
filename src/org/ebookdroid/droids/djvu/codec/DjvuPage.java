@@ -1,32 +1,31 @@
 package org.ebookdroid.droids.djvu.codec;
 
-import org.ebookdroid.EBookDroidLibraryLoader;
-import org.ebookdroid.common.bitmaps.BitmapManager;
-import org.ebookdroid.common.bitmaps.BitmapRef;
-import org.ebookdroid.common.settings.SettingsManager;
-import org.ebookdroid.core.codec.CodecPage;
+import org.ebookdroid.common.bitmaps.ByteBufferBitmap;
+import org.ebookdroid.common.bitmaps.ByteBufferManager;
+import org.ebookdroid.common.settings.AppSettings;
+import org.ebookdroid.core.ViewState;
+import org.ebookdroid.core.codec.AbstractCodecPage;
 import org.ebookdroid.core.codec.PageLink;
 import org.ebookdroid.core.codec.PageTextBox;
 
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.Rect;
 import android.graphics.RectF;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 import org.emdev.utils.LengthUtils;
 
-public class DjvuPage implements CodecPage {
+public class DjvuPage extends AbstractCodecPage {
 
     private final long contextHandle;
     private final long docHandle;
     private final int pageNo;
     private long pageHandle;
+
+    private final static boolean USE_DIRECT = true;
 
     DjvuPage(final long contextHandle, final long docHandle, final long pageHandle, final int pageNo) {
         this.contextHandle = contextHandle;
@@ -46,32 +45,23 @@ public class DjvuPage implements CodecPage {
     }
 
     @Override
-    public BitmapRef renderBitmap(final int width, final int height, final RectF pageSliceBounds) {
-        final int renderMode = SettingsManager.getAppSettings().djvuRenderingMode;
-        BitmapRef bmp = null;
+    public ByteBufferBitmap renderBitmap(final ViewState viewState, final int width, final int height,
+            final RectF pageSliceBounds) {
+        final int renderMode = AppSettings.current().djvuRenderingMode;
+
+        ByteBufferBitmap buf = ByteBufferManager.getBitmap(width, height);
         if (width > 0 && height > 0) {
-            bmp = BitmapManager.getBitmap("Djvu page", width, height, Bitmap.Config.RGB_565);
-            if (EBookDroidLibraryLoader.nativeGraphicsAvailable && SettingsManager.getAppSettings().useNativeGraphics) {
-                if (renderPageBitmap(pageHandle, width, height, pageSliceBounds.left, pageSliceBounds.top,
-                        pageSliceBounds.width(), pageSliceBounds.height(), bmp.getBitmap(), renderMode)) {
-                    return bmp;
-                }
-            } else {
-                final int[] buffer = new int[width * height];
-                renderPage(pageHandle, width, height, pageSliceBounds.left, pageSliceBounds.top,
-                        pageSliceBounds.width(), pageSliceBounds.height(), buffer, renderMode);
-                bmp.getBitmap().setPixels(buffer, 0, width, 0, 0, width, height);
-                return bmp;
+
+            final ByteBuffer byteBuffer = buf.getPixels();
+
+            if (renderPageDirect(pageHandle, contextHandle, width, height, pageSliceBounds.left, pageSliceBounds.top,
+                    pageSliceBounds.width(), pageSliceBounds.height(), byteBuffer, renderMode)) {
+                return buf;
             }
         }
-        if (bmp == null) {
-            bmp = BitmapManager.getBitmap("Djvu page", 100, 100, Bitmap.Config.RGB_565);
-        }
-        final Canvas c = new Canvas(bmp.getBitmap());
-        final Paint paint = new Paint();
-        paint.setColor(Color.GRAY);
-        c.drawRect(new Rect(0, 0, width, height), paint);
-        return bmp;
+
+        buf.eraseColor(Color.GRAY);
+        return buf;
     }
 
     @Override
@@ -134,13 +124,12 @@ public class DjvuPage implements CodecPage {
 
     @Override
     public List<? extends RectF> searchText(final String pattern) {
-        final List<PageTextBox> list = getPageText(docHandle, pageNo, contextHandle, pattern.toLowerCase());
+        final List<PageTextBox> list = getPageText(docHandle, pageNo, contextHandle, pattern);
         if (LengthUtils.isNotEmpty(list)) {
             final float width = getWidth();
             final float height = getHeight();
             for (final PageTextBox ptb : list) {
                 normalizeTextBox(ptb, width, height);
-                // System.out.println("" + ptb);
             }
         }
         return list;
@@ -170,12 +159,9 @@ public class DjvuPage implements CodecPage {
 
     private static native boolean isDecodingDone(long pageHandle);
 
-    private static native boolean renderPage(long pageHandle, int targetWidth, int targetHeight, float pageSliceX,
-            float pageSliceY, float pageSliceWidth, float pageSliceHeight, int[] buffer, int renderMode);
-
-    private static native boolean renderPageBitmap(long pageHandle, int targetWidth, int targetHeight,
-            float pageSliceX, float pageSliceY, float pageSliceWidth, float pageSliceHeight, Bitmap bitmap,
-            int renderMode);
+    private static native boolean renderPageDirect(long pageHandle, long contextHandle, int targetWidth,
+            int targetHeight, float pageSliceX, float pageSliceY, float pageSliceWidth, float pageSliceHeight,
+            ByteBuffer byteBuffer, int renderMode);
 
     private static native void free(long pageHandle);
 

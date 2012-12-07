@@ -1,37 +1,66 @@
 package org.emdev.ui.uimanager;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+
+import java.util.HashMap;
+import java.util.Map;
 
 public class UIManager1x implements IUIManager {
 
     private static final int FLAG_FULLSCREEN = WindowManager.LayoutParams.FLAG_FULLSCREEN;
 
-    private boolean fullScreen = false;
+    private static final Map<ComponentName, Data> data = new HashMap<ComponentName, Data>() {
+
+        /**
+         * Serial version UID.
+         */
+        private static final long serialVersionUID = -3701577210751612032L;
+
+        @Override
+        public Data get(final Object key) {
+            Data existing = super.get(key);
+            if (existing == null) {
+                existing = new Data();
+                put((ComponentName) key, existing);
+            }
+            return existing;
+        }
+
+    };
 
     @Override
-    public void setTitleVisible(Activity activity, boolean visible) {
-        try {
-            Window window = activity.getWindow();
-            if (!visible) {
-                window.requestFeature(Window.FEATURE_NO_TITLE);
-            } else {
-                window.requestFeature(Window.FEATURE_INDETERMINATE_PROGRESS);
-                activity.setProgressBarIndeterminate(true);
-                activity.setProgressBarIndeterminateVisibility(true);
-                window.setFeatureInt(Window.FEATURE_INDETERMINATE_PROGRESS, 1);
+    public void setTitleVisible(final Activity activity, final boolean visible, final boolean firstTime) {
+        if (firstTime) {
+            try {
+                final Window window = activity.getWindow();
+                if (!visible) {
+                    window.requestFeature(Window.FEATURE_NO_TITLE);
+                } else {
+                    window.requestFeature(Window.FEATURE_INDETERMINATE_PROGRESS);
+                    activity.setProgressBarIndeterminate(true);
+                    activity.setProgressBarIndeterminateVisibility(true);
+                    window.setFeatureInt(Window.FEATURE_INDETERMINATE_PROGRESS, 1);
+                }
+                data.get(activity.getComponentName()).titleVisible = visible;
+            } catch (final Throwable th) {
+                LCTX.e("Error on requestFeature call: " + th.getMessage());
             }
-        } catch (final Throwable th) {
-            LCTX.e("Error on requestFeature call: " + th.getMessage());
         }
     }
 
     @Override
+    public boolean isTitleVisible(final Activity activity) {
+        return data.get(activity.getComponentName()).titleVisible;
+    }
+
+    @Override
     public void setFullScreenMode(final Activity activity, final View view, final boolean fullScreen) {
-        this.fullScreen = fullScreen;
-        Window w = activity.getWindow();
+        data.get(activity.getComponentName()).fullScreen = fullScreen;
+        final Window w = activity.getWindow();
         if (fullScreen) {
             w.setFlags(FLAG_FULLSCREEN, FLAG_FULLSCREEN);
         } else {
@@ -40,28 +69,24 @@ public class UIManager1x implements IUIManager {
     }
 
     @Override
-    public void setHardwareAccelerationEnabled(final boolean enabled) {
-    }
-
-    @Override
-    public void setHardwareAccelerationMode(final View view, final boolean accelerated) {
-    }
-
-    @Override
     public void openOptionsMenu(final Activity activity, final View view) {
         activity.openOptionsMenu();
     }
 
     @Override
+    public void invalidateOptionsMenu(final Activity activity) {
+    }
+
+    @Override
     public void onMenuOpened(final Activity activity) {
-        if (fullScreen) {
+        if (data.get(activity.getComponentName()).fullScreen) {
             activity.getWindow().clearFlags(FLAG_FULLSCREEN);
         }
     }
 
     @Override
     public void onMenuClosed(final Activity activity) {
-        if (fullScreen) {
+        if (data.get(activity.getComponentName()).fullScreen) {
             activity.getWindow().setFlags(FLAG_FULLSCREEN, FLAG_FULLSCREEN);
         }
     }
@@ -77,4 +102,16 @@ public class UIManager1x implements IUIManager {
     @Override
     public void onDestroy(final Activity activity) {
     }
+
+    @Override
+    public boolean isTabletUi(final Activity activity) {
+        return false;
+    }
+
+    private static class Data {
+
+        boolean fullScreen = false;
+        boolean titleVisible = true;
+    }
+
 }

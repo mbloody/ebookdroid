@@ -20,11 +20,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.emdev.common.android.AndroidVersion;
 import org.emdev.ui.actions.ActionEx;
 import org.emdev.ui.adapters.ActionsAdapter;
 import org.emdev.utils.LayoutUtils;
 import org.emdev.utils.LengthUtils;
-import org.emdev.utils.android.AndroidVersion;
 
 public class KeyBindingsDialog extends Dialog {
 
@@ -50,6 +50,7 @@ public class KeyBindingsDialog extends Dialog {
 
         final KeyGroup management = groups.add("Management keys");
         management.addInterval(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_VOLUME_DOWN);
+        management.addInterval(96 /* KeyEvent.KEYCODE_BUTTON_A */, 110/* KeyEvent.KEYCODE_BUTTON_MODE */);
 
         final KeyGroup phone = groups.add("Phone keys");
 
@@ -70,10 +71,8 @@ public class KeyBindingsDialog extends Dialog {
             keyboard.addInterval(/* KeyEvent.KEYCODE_MOVE_HOME */122, /* KeyEvent.KEYCODE_NUMPAD_RIGHT_PAREN */163);
         }
 
-        final KeyGroup camera = groups.add("Camera keys");
-        camera.add(KeyEvent.KEYCODE_CAMERA, KeyEvent.KEYCODE_CLEAR);
-
         final KeyGroup service = groups.add("Service keys");
+        service.add(KeyEvent.KEYCODE_CAMERA, KeyEvent.KEYCODE_CLEAR);
         service.addInterval(KeyEvent.KEYCODE_NOTIFICATION, KeyEvent.KEYCODE_MUTE);
         return groups;
     }

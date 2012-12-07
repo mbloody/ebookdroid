@@ -1,15 +1,12 @@
 package org.ebookdroid.ui.library.adapters;
 
 import org.ebookdroid.R;
-import org.ebookdroid.common.settings.AppSettings;
-import org.ebookdroid.common.settings.SettingsManager;
-import org.ebookdroid.common.settings.books.BookSettings;
+import org.ebookdroid.common.notifications.INotificationManager;
+import org.ebookdroid.common.settings.LibSettings;
 import org.ebookdroid.ui.library.IBrowserActivity;
 import org.ebookdroid.ui.library.views.BookshelfView;
 
-
 import android.database.DataSetObserver;
-import android.os.AsyncTask;
 import android.os.Parcelable;
 import android.support.v4.view.PagerAdapter;
 import android.support.v4.view.ViewPager;
@@ -19,20 +16,27 @@ import android.widget.TextView;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.emdev.common.filesystem.FileSystemScanner;
+import org.emdev.common.filesystem.MediaManager;
 import org.emdev.ui.adapters.BaseViewHolder;
+import org.emdev.ui.tasks.AsyncTask;
+import org.emdev.utils.FileUtils;
 import org.emdev.utils.LengthUtils;
 import org.emdev.utils.StringUtils;
 import org.emdev.utils.collections.SparseArrayEx;
-import org.emdev.utils.filesystem.FileSystemScanner;
+import org.emdev.utils.collections.TLIterator;
 
 public class BooksAdapter extends PagerAdapter implements FileSystemScanner.Listener, Iterable<BookShelfAdapter> {
 
@@ -66,9 +70,18 @@ public class BooksAdapter extends PagerAdapter implements FileSystemScanner.List
         this.base = base;
         this.recent = adapter;
         this.recent.registerDataSetObserver(updater);
-        this.scanner = new FileSystemScanner(base);
+
+        this.scanner = new FileSystemScanner(base.getActivity());
         this.scanner.addListener(this);
-        this.searchQuery = SettingsManager.getAppSettings().searchBookQuery;
+        this.scanner.addListener(base);
+
+        this.searchQuery = LibSettings.current().searchBookQuery;
+    }
+
+    public void onDestroy() {
+        scanner.shutdown();
+        data.clear();
+        folders.clear();
     }
 
     @Override
@@ -83,7 +96,7 @@ public class BooksAdapter extends PagerAdapter implements FileSystemScanner.List
     }
 
     @Override
-    public Iterator<BookShelfAdapter> iterator() {
+    public TLIterator<BookShelfAdapter> iterator() {
         return data.iterator();
     }
 
@@ -117,6 +130,36 @@ public class BooksAdapter extends PagerAdapter implements FileSystemScanner.List
     @Override
     public void startUpdate(final View arg0) {
         // TODO Auto-generated method stub
+    }
+
+    private void addShelf(final BookShelfAdapter a) {
+        data.append(a.id, a);
+        folders.put(a.path, a);
+        if (a.mpath != null) {
+            folders.put(a.mpath, a);
+        }
+    }
+
+    private void removeShelf(final BookShelfAdapter a) {
+        data.remove(a.id);
+        folders.remove(a.path);
+        if (a.mpath != null) {
+            folders.remove(a.mpath);
+        }
+    }
+
+    public synchronized BookShelfAdapter getShelf(final String path) {
+        final BookShelfAdapter a = folders.get(path);
+        if (a != null) {
+            return a;
+        }
+        final String mpath = FileUtils.invertMountPrefix(path);
+        return mpath != null ? folders.get(path) : null;
+    }
+
+    public synchronized int getShelfPosition(final BookShelfAdapter shelf) {
+        checkServiceAdapters();
+        return data.indexOfValue(shelf);
     }
 
     public synchronized BookShelfAdapter getList(final int index) {
@@ -248,17 +291,70 @@ public class BooksAdapter extends PagerAdapter implements FileSystemScanner.List
 
     public void startScan() {
         clearData();
-        final AppSettings appSettings = SettingsManager.getAppSettings();
-        scanner.startScan(appSettings.allowedFileTypes, appSettings.autoScanDirs);
+        final LibSettings libSettings = LibSettings.current();
+        final Set<String> folders = new LinkedHashSet<String>(libSettings.autoScanDirs);
+        if (libSettings.autoScanRemovableMedia) {
+            folders.addAll(MediaManager.getReadableMedia());
+        }
+        scanner.startScan(libSettings.allowedFileTypes, folders);
+    }
+
+    public void startScan(final String path) {
+        final LibSettings libSettings = LibSettings.current();
+        scanner.startScan(libSettings.allowedFileTypes, path);
+    }
+
+    public void startScan(final Collection<String> paths) {
+        final LibSettings libSettings = LibSettings.current();
+        scanner.startScan(libSettings.allowedFileTypes, paths);
     }
 
     public void stopScan() {
         scanner.stopScan();
     }
 
+    public synchronized void removeAll(final Collection<String> paths) {
+        boolean found = false;
+        for (final String path : paths) {
+            scanner.stopObservers(path);
+            found |= removeAllImpl(path);
+        }
+        if (found) {
+            notifyDataSetChanged();
+        }
+    }
+
+    public synchronized void removeAll(final String path) {
+        scanner.stopObservers(path);
+        if (removeAllImpl(path)) {
+            notifyDataSetChanged();
+        }
+    }
+
+    private boolean removeAllImpl(final String path) {
+        final String ap = path + "/";
+        final TLIterator<BookShelfAdapter> iter = data.iterator();
+        boolean found = false;
+        while (iter.hasNext()) {
+            final BookShelfAdapter next = iter.next();
+            final boolean eq = next.path.startsWith(ap) || next.path.equals(path) || next.mpath != null
+                    && (next.mpath.startsWith(ap) || next.mpath.equals(path));
+            if (eq) {
+                folders.remove(next.path);
+                if (next.mpath != null) {
+                    folders.remove(next.mpath);
+                }
+                iter.remove();
+                found = true;
+            }
+        }
+        iter.release();
+        return found;
+    }
+
     public boolean startSearch(final String searchQuery) {
         this.searchQuery = LengthUtils.safeString(searchQuery).trim();
-        SettingsManager.updateSearchBookQuery(this.searchQuery);
+        LibSettings.updateSearchBookQuery(this.searchQuery);
 
         clearSearch();
 
@@ -287,120 +383,136 @@ public class BooksAdapter extends PagerAdapter implements FileSystemScanner.List
     @Override
     public synchronized void onFileScan(final File parent, final File[] files) {
         final String dir = parent.getAbsolutePath();
-        BookShelfAdapter a = folders.get(dir);
+        BookShelfAdapter a = getShelf(dir);
+
         if (LengthUtils.isEmpty(files)) {
             if (a != null) {
                 onDirDeleted(parent.getParentFile(), parent);
             }
-        } else {
-            final BookShelfAdapter search = getService(SEARCH_INDEX);
-            if (a == null) {
-                a = new BookShelfAdapter(base, SEQ.getAndIncrement(), parent.getName(), dir);
-                data.append(a.id, a);
-                folders.put(dir, a);
-                boolean found = false;
-                for (final File f : files) {
-                    final BookNode node = new BookNode(f);
-                    a.nodes.add(node);
-                    if (acceptSearch(node)) {
-                        found = true;
-                        search.nodes.add(node);
-                    }
-                }
-                if (found) {
-                    Collections.sort(search.nodes);
-                }
-                notifyDataSetChanged();
-            } else {
-                boolean found = false;
-                for (final File f : files) {
-                    final BookNode node = new BookNode(f);
-                    a.nodes.add(node);
-                    if (acceptSearch(node)) {
-                        found = true;
-                        search.nodes.add(node);
-                    }
-                }
-                a.notifyDataSetChanged();
-                if (found) {
-                    Collections.sort(search.nodes);
-                    search.notifyDataSetChanged();
-                }
+            return;
+        }
+
+        boolean newShelf = false;
+        if (a == null) {
+            a = new BookShelfAdapter(base, SEQ.getAndIncrement(), parent.getName(), dir);
+            addShelf(a);
+            newShelf = true;
+        }
+
+        final BookShelfAdapter search = getService(SEARCH_INDEX);
+        boolean found = false;
+        for (final File f : files) {
+            BookNode node = recent.getNode(f.getAbsolutePath());
+            if (node == null) {
+                node = new BookNode(f, null);
             }
+            a.nodes.add(node);
+            if (acceptSearch(node)) {
+                found = true;
+                search.nodes.add(node);
+            }
+        }
+        if (newShelf) {
+            notifyDataSetChanged();
+        } else {
+            a.notifyDataSetChanged();
+        }
+        if (found) {
+            Collections.sort(search.nodes);
+            search.notifyDataSetChanged();
         }
     }
 
     @Override
     public synchronized void onFileAdded(final File parent, final File f) {
-        if (f != null) {
-            final String dir = parent.getAbsolutePath();
-            BookShelfAdapter a = folders.get(dir);
+        if (f == null) {
+            return;
+        }
+
+        if (!LibSettings.current().allowedFileTypes.accept(f)) {
+            return;
+        }
+
+        final String dir = parent.getAbsolutePath();
+        boolean newShelf = false;
+        BookShelfAdapter a = getShelf(dir);
+
+        if (a == null) {
+            a = new BookShelfAdapter(base, SEQ.getAndIncrement(), parent.getName(), dir);
+            addShelf(a);
+            newShelf = true;
+        }
+
+        BookNode node = recent.getNode(f.getAbsolutePath());
+        if (node == null) {
+            node = new BookNode(f, null);
+        }
+        a.nodes.add(node);
+        Collections.sort(a.nodes);
+        if (newShelf) {
+            notifyDataSetChanged();
+        } else {
+            a.notifyDataSetChanged();
+        }
+
+        if (acceptSearch(node)) {
             final BookShelfAdapter search = getService(SEARCH_INDEX);
-            final BookNode node = new BookNode(f);
-            if (a == null) {
-                a = new BookShelfAdapter(base, SEQ.getAndIncrement(), parent.getName(), dir);
-                data.append(a.id, a);
-                folders.put(dir, a);
-                a.nodes.add(node);
-                Collections.sort(a.nodes);
-                if (acceptSearch(node)) {
-                    search.nodes.add(node);
-                    Collections.sort(search.nodes);
-                }
-                notifyDataSetChanged();
-            } else {
-                a.nodes.add(node);
-                Collections.sort(a.nodes);
-                a.notifyDataSetChanged();
-                if (acceptSearch(node)) {
-                    search.nodes.add(node);
-                    Collections.sort(search.nodes);
-                    search.notifyDataSetChanged();
-                }
-            }
+            search.nodes.add(node);
+            Collections.sort(search.nodes);
+            search.notifyDataSetChanged();
+        }
+
+        if (LibSettings.current().showNotifications) {
+            INotificationManager.instance.notify(R.string.notification_file_add, f.getAbsolutePath(), null);
         }
     }
 
     @Override
     public synchronized void onFileDeleted(final File parent, final File f) {
-        final String dir = parent.getAbsolutePath();
-        final BookShelfAdapter a = folders.get(dir);
-        if (a != null) {
-            final String path = f.getAbsolutePath();
-            final BookShelfAdapter search = getService(SEARCH_INDEX);
-            for (final Iterator<BookNode> i = a.nodes.iterator(); i.hasNext();) {
-                final BookNode node = i.next();
-                if (path.equals(node.path)) {
-                    i.remove();
-                    if (a.nodes.isEmpty()) {
-                        data.remove(a.id);
-                        folders.remove(a.path);
-                        this.notifyDataSetChanged();
-                    } else {
-                        a.notifyDataSetChanged();
-                    }
-                    if (search.nodes.remove(node)) {
-                        search.notifyDataSetChanged();
-                    }
-                    return;
+        if (f == null) {
+            return;
+        }
+        final BookShelfAdapter a = getShelf(parent.getAbsolutePath());
+        if (a == null) {
+            return;
+        }
+
+        final String path = f.getAbsolutePath();
+        final BookShelfAdapter search = getService(SEARCH_INDEX);
+
+        for (final Iterator<BookNode> i = a.nodes.iterator(); i.hasNext();) {
+            final BookNode node = i.next();
+            if (path.equals(node.path)) {
+                i.remove();
+                if (a.nodes.isEmpty()) {
+                    removeShelf(a);
+                    this.notifyDataSetChanged();
+                } else {
+                    a.notifyDataSetChanged();
                 }
+                if (search.nodes.remove(node)) {
+                    search.notifyDataSetChanged();
+                }
+                if (LibSettings.current().showNotifications) {
+                    INotificationManager.instance.notify(R.string.notification_file_delete, f.getAbsolutePath(), null);
+                }
+                return;
             }
         }
     }
 
     @Override
     public void onDirAdded(final File parent, final File f) {
-        final AppSettings appSettings = SettingsManager.getAppSettings();
-        scanner.startScan(appSettings.allowedFileTypes, f.getAbsolutePath());
+        final LibSettings libSettings = LibSettings.current();
+        scanner.startScan(libSettings.allowedFileTypes, f.getAbsolutePath());
     }
 
     @Override
     public synchronized void onDirDeleted(final File parent, final File f) {
         final String dir = f.getAbsolutePath();
-        final BookShelfAdapter a = folders.get(dir);
+        final BookShelfAdapter a = getShelf(dir);
         if (a != null) {
-            data.remove(a.id);
-            folders.remove(a.path);
+            removeShelf(a);
             this.notifyDataSetChanged();
         }
     }
@@ -462,11 +574,9 @@ public class BooksAdapter extends PagerAdapter implements FileSystemScanner.List
             ra.nodes.clear();
             final int count = recent.getCount();
             for (int i = 0; i < count; i++) {
-                final BookSettings item = recent.getItem(i);
-                final File file = new File(item.fileName);
-                final BookNode book = new BookNode(file);
+                final BookNode book = recent.getItem(i);
                 ra.nodes.add(book);
-                final BookShelfAdapter a = folders.get(new File(book.path).getParent());
+                final BookShelfAdapter a = getShelf(new File(book.path).getParent());
                 if (a != null) {
                     a.notifyDataSetInvalidated();
                 }

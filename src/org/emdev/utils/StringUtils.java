@@ -199,7 +199,7 @@ public class StringUtils {
         return NFC;
     }
 
-    public static int split(char[] str, int begin, int len, int[] outStart, int[] outLength) {
+    public static int split(char[] str, int begin, int len, int[] outStart, int[] outLength, boolean lineBreaksOnly) {
         if (str == null) {
             return 0;
         }
@@ -210,7 +210,7 @@ public class StringUtils {
         int index = 0;
         boolean match = false;
         while (i < begin + len) {
-            if (str[i] == 0x20 || str[i] == 0x0D || str[i] == 0x0A || str[i] == 0x09) {
+            if ((lineBreaksOnly && (str[i] == 0x0D || str[i] == 0x0A)) || (!lineBreaksOnly && (str[i] == 0x20 || str[i] == 0x0D || str[i] == 0x0A || str[i] == 0x09))) {
                 if (match) {
                     outStart[index] = start;
                     outLength[index] = i - start;
@@ -249,6 +249,52 @@ public class StringUtils {
             }
             return compareNatural(o1.getAbsolutePath(), o2.getAbsolutePath());
         }
+    }
+
+
+    public static int parseInt(char[]string, int start, int length, int radix) throws NumberFormatException {
+        if (radix < Character.MIN_RADIX || radix > Character.MAX_RADIX) {
+            throw new NumberFormatException("Invalid radix: " + radix);
+        }
+        if (string == null) {
+            throw new NumberFormatException(new String(string, start, length));
+        }
+        int i = 0;
+        if (length == 0) {
+            throw new NumberFormatException(new String(string, start, length));
+        }
+        boolean negative = string[start+i] == '-';
+        if (negative && ++i == length) {
+            throw new NumberFormatException(new String(string, start, length));
+        }
+
+        return parse(string, start, length, i, radix, negative);
+    }
+
+    private static int parse(char[]string, int start, int length, int offset, int radix, boolean negative) throws NumberFormatException {
+        int max = Integer.MIN_VALUE / radix;
+        int result = 0;
+        while (offset < length) {
+            int digit = Character.digit(string[start+(offset++)], radix);
+            if (digit == -1) {
+                throw new NumberFormatException(new String(string, start, length));
+            }
+            if (max > result) {
+                throw new NumberFormatException(new String(string, start, length));
+            }
+            int next = result * radix - digit;
+            if (next > result) {
+                throw new NumberFormatException(new String(string, start, length));
+            }
+            result = next;
+        }
+        if (!negative) {
+            result = -result;
+            if (result < 0) {
+                throw new NumberFormatException(new String(string, start, length));
+            }
+        }
+        return result;
     }
 
 }

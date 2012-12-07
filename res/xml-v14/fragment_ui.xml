@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen 
+<PreferenceScreen
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:ebookdroid="http://ebookdroid.org" 
+    xmlns:ebookdroid="http://ebookdroid.org"
     android:summary="@string/pref_ui_category_summary"
     android:title="@string/pref_ui_category" >
+
+    <ListPreference
+            android:defaultValue="@string/pref_lang_default"
+            android:entries="@array/pref_lang_entries"
+            android:entryValues="@array/pref_lang_values"
+            android:key="@string/pref_lang_id"
+            android:summary="@string/pref_lang_summary"
+            android:title="@string/pref_lang_title" />
 
     <org.emdev.ui.preference.SwitchPreferenceEx
             android:defaultValue="@string/pref_loadrecent_defvalue"
@@ -36,14 +44,6 @@
             android:key="@string/pref_keepscreenon_id"
             android:summary="@string/pref_keepscreenon_summary"
             android:title="@string/pref_keepscreenon_title" />
-
-    <ListPreference
-            android:defaultValue="@string/pref_rotation_auto"
-            android:entries="@array/pref_rotation_entries"
-            android:entryValues="@array/pref_rotation_values"
-            android:key="@string/pref_rotation_id"
-            android:summary="@string/pref_rotation_summary"
-            android:title="@string/pref_rotation_title" />
 
     <org.emdev.ui.preference.SwitchPreferenceEx
             android:defaultValue="@string/pref_fullscreen_defvalue"

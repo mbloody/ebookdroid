@@ -1,4 +1,4 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 fz_stream *
 fz_new_stream(fz_context *ctx, void *state,
@@ -42,7 +42,8 @@ fz_new_stream(fz_context *ctx, void *state,
 fz_stream *
 fz_keep_stream(fz_stream *stm)
 {
-	stm->refs ++;
+	if (stm)
+		stm->refs ++;
 	return stm;
 }
 
@@ -114,7 +115,21 @@ fz_open_fd(fz_context *ctx, int fd)
 fz_stream *
 fz_open_file(fz_context *ctx, const char *name)
 {
+#ifdef _WIN32
+	char *s = (char*)name;
+	wchar_t *wname, *d;
+	int c, fd;
+	d = wname = fz_malloc(ctx, (strlen(name)+1) * sizeof(wchar_t));
+	while (*s) {
+		s += fz_chartorune(&c, s);
+		*d++ = c;
+	}
+	*d = 0;
+	fd = _wopen(wname, O_BINARY | O_RDONLY, 0);
+	fz_free(ctx, wname);
+#else
 	int fd = open(name, O_BINARY | O_RDONLY, 0);
+#endif
 	if (fd == -1)
 		fz_throw(ctx, "cannot open %s", name);
 	return fz_open_fd(ctx, fd);
@@ -126,7 +141,7 @@ fz_open_file_w(fz_context *ctx, const wchar_t *name)
 {
 	int fd = _wopen(name, O_BINARY | O_RDONLY, 0);
 	if (fd == -1)
-		return NULL;
+		fz_throw(ctx, "cannot open file %Ls", name);
 	return fz_open_fd(ctx, fd);
 }
 #endif
@@ -146,7 +161,7 @@ static void seek_buffer(fz_stream *stm, int offset, int whence)
 		stm->rp += offset;
 	if (whence == 2)
 		stm->rp = stm->ep - offset;
-	stm->rp = CLAMP(stm->rp, stm->bp, stm->ep);
+	stm->rp = fz_clampp(stm->rp, stm->bp, stm->ep);
 	stm->wp = stm->ep;
 }
 
@@ -162,7 +177,7 @@ fz_open_buffer(fz_context *ctx, fz_buffer *buf)
 {
 	fz_stream *stm;
 
-	fz_keep_buffer(buf);
+	fz_keep_buffer(ctx, buf);
 	stm = fz_new_stream(ctx, buf, read_buffer, close_buffer);
 	stm->seek = seek_buffer;
 

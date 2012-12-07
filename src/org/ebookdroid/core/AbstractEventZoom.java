@@ -2,6 +2,8 @@ package org.ebookdroid.core;
 
 import org.ebookdroid.common.settings.SettingsManager;
 
+import android.graphics.RectF;
+
 import java.util.Queue;
 
 import org.emdev.utils.LengthUtils;
@@ -18,12 +20,12 @@ public abstract class AbstractEventZoom<E extends AbstractEventZoom<E>> extends 
 
     public boolean committed;
 
-    protected AbstractEventZoom(Queue<E> eventQueue) {
+    protected AbstractEventZoom(final Queue<E> eventQueue) {
         this.eventQueue = eventQueue;
     }
 
     final void init(final AbstractViewController ctrl, final float oldZoom, final float newZoom, final boolean committed) {
-        this.viewState = new ViewState(ctrl, newZoom);
+        this.viewState = ViewState.get(ctrl, newZoom);
         this.ctrl = ctrl;
 
         this.oldZoom = oldZoom;
@@ -49,7 +51,7 @@ public abstract class AbstractEventZoom<E extends AbstractEventZoom<E>> extends 
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.core.AbstractEvent#process()
      */
     @Override
@@ -57,15 +59,15 @@ public abstract class AbstractEventZoom<E extends AbstractEventZoom<E>> extends 
         try {
             if (!committed) {
                 ctrl.getView().invalidateScroll(newZoom, oldZoom);
-                viewState = new ViewState(ctrl);
+                viewState.update();
             }
 
-            viewState = super.process();
+            super.process();
 
             if (!committed) {
                 ctrl.redrawView(viewState);
             } else {
-                SettingsManager.zoomChanged(newZoom, true);
+                SettingsManager.zoomChanged(viewState.book, newZoom, true);
                 ctrl.updatePosition(ctrl.model.getCurrentPageObject(), viewState);
             }
             return viewState;
@@ -76,7 +78,7 @@ public abstract class AbstractEventZoom<E extends AbstractEventZoom<E>> extends 
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.core.IEvent#process(org.ebookdroid.core.ViewState, org.ebookdroid.core.PageTree)
      */
     @Override
@@ -86,35 +88,36 @@ public abstract class AbstractEventZoom<E extends AbstractEventZoom<E>> extends 
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.core.AbstractEvent#calculatePageVisibility(org.ebookdroid.core.ViewState)
      */
     @Override
-    protected final ViewState calculatePageVisibility(final ViewState initial) {
+    protected final void calculatePageVisibility() {
         final int viewIndex = ctrl.model.getCurrentViewPageIndex();
         int firstVisiblePage = viewIndex;
         int lastVisiblePage = viewIndex;
 
         final Page[] pages = ctrl.model.getPages();
         if (LengthUtils.isEmpty(pages)) {
-            return initial;
+            return;
         }
 
+        final RectF bounds = new RectF();
         while (firstVisiblePage > 0) {
             final int index = firstVisiblePage - 1;
-            if (!ctrl.isPageVisible(pages[index], initial)) {
+            if (!ctrl.isPageVisible(pages[index], viewState, bounds)) {
                 break;
             }
             firstVisiblePage = index;
         }
         while (lastVisiblePage < pages.length - 1) {
             final int index = lastVisiblePage + 1;
-            if (!ctrl.isPageVisible(pages[index], initial)) {
+            if (!ctrl.isPageVisible(pages[index], viewState, bounds)) {
                 break;
             }
             lastVisiblePage = index;
         }
 
-        return new ViewState(initial, firstVisiblePage, lastVisiblePage);
+        viewState.update(firstVisiblePage, lastVisiblePage);
     }
 }

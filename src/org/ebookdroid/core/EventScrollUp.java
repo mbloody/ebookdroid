@@ -1,5 +1,7 @@
 package org.ebookdroid.core;
 
+import android.graphics.RectF;
+
 import java.util.Queue;
 
 import org.emdev.utils.LengthUtils;
@@ -16,37 +18,102 @@ public class EventScrollUp extends AbstractEventScroll<EventScrollUp> {
      * @see org.ebookdroid.core.AbstractEvent#calculatePageVisibility(org.ebookdroid.core.ViewState)
      */
     @Override
-    protected ViewState calculatePageVisibility(final ViewState initial) {
+    protected void calculatePageVisibility() {
         final Page[] pages = ctrl.model.getPages();
         if (LengthUtils.isEmpty(pages)) {
-            return initial;
+            return;
         }
 
-        int firstVisiblePage = initial.pages.firstVisible;
-        int lastVisiblePage = initial.pages.lastVisible;
+        final int firstVisiblePage = viewState.pages.firstVisible;
+        final int lastVisiblePage = viewState.pages.lastVisible;
 
-        if (LengthUtils.isNotEmpty(pages) && lastVisiblePage != -1) {
-            for (int i = lastVisiblePage; i >= 0; i--) {
-                if (!ctrl.isPageVisible(pages[i], initial)) {
-                    continue;
-                } else {
-                    lastVisiblePage = i;
-                    break;
+        if (firstVisiblePage == -1) {
+            super.calculatePageVisibility();
+            return;
+        }
+
+        final RectF bounds = new RectF();
+        if (ctrl.isPageVisible(pages[firstVisiblePage], viewState, bounds)) {
+            findLastVisiblePage(pages, firstVisiblePage, true, bounds);
+            return;
+        }
+
+        if (firstVisiblePage != lastVisiblePage && ctrl.isPageVisible(pages[lastVisiblePage], viewState, bounds)) {
+            findFirstVisiblePage(pages, lastVisiblePage, true, bounds);
+            return;
+        }
+
+        final int midIndex = firstVisiblePage + 1;
+        int delta = 0;
+        int run = 2;
+        while (run > 0) {
+            run = 0;
+            final int left = midIndex - delta;
+            final int right = midIndex + delta;
+            if (left >= 0) {
+                run++;
+                if (ctrl.isPageVisible(pages[left], viewState, bounds)) {
+                    findFirstVisiblePage(pages, left, false, bounds);
+                    return;
                 }
             }
-            firstVisiblePage = lastVisiblePage;
-            while (firstVisiblePage > 0) {
-                final int index = firstVisiblePage - 1;
-                if (!ctrl.isPageVisible(pages[index], initial)) {
+            if (right < pages.length - 1) {
+                run++;
+                if (ctrl.isPageVisible(pages[right], viewState, bounds)) {
+                    findLastVisiblePage(pages, right, false, bounds);
+                    return;
+                }
+            }
+            delta++;
+        }
+
+        viewState.update(-1, -1);
+    }
+
+    protected void findLastVisiblePage(final Page[] pages, final int first, final boolean updateFirst,
+            final RectF outBounds) {
+        int firstVisiblePage = first;
+        // If firstVisiblePage is still visible, try to find lastVisiblePage
+        int lastVisiblePage = firstVisiblePage;
+        while (lastVisiblePage < pages.length - 1) {
+            final int index = lastVisiblePage + 1;
+            if (!ctrl.isPageVisible(pages[index], viewState, outBounds)) {
+                break;
+            }
+            lastVisiblePage = index;
+        }
+        if (updateFirst) {
+            // Then try to find real firstVisiblePage
+            for (int index = firstVisiblePage - 1; index >= 0; index--) {
+                if (!ctrl.isPageVisible(pages[index], viewState, outBounds)) {
                     break;
                 }
                 firstVisiblePage = index;
             }
-
-            return new ViewState(initial, firstVisiblePage, lastVisiblePage);
         }
-
-        return super.calculatePageVisibility(initial);
+        viewState.update(firstVisiblePage, lastVisiblePage);
     }
 
+    protected void findFirstVisiblePage(final Page[] pages, final int last, final boolean updateLast,
+            final RectF outBounds) {
+        int lastVisiblePage = last;
+        // If lastVisiblePage is still visible, try to find firstVisiblePage
+        int firstVisiblePage = lastVisiblePage;
+        for (int index = lastVisiblePage - 1; index >= 0; index--) {
+            if (!ctrl.isPageVisible(pages[index], viewState, outBounds)) {
+                break;
+            }
+            firstVisiblePage = index;
+        }
+        if (updateLast) {
+            // Then try to find real lastVisiblePage
+            for (int index = lastVisiblePage + 1; index < pages.length; index++) {
+                if (!ctrl.isPageVisible(pages[index], viewState, outBounds)) {
+                    break;
+                }
+                lastVisiblePage = index;
+            }
+        }
+        viewState.update(firstVisiblePage, lastVisiblePage);
+    }
 }

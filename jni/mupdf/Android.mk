@@ -94,7 +94,8 @@ MY_JBIG2DEC_SRC_FILES := \
 	jbig2dec/jbig2_symbol_dict.c \
 	jbig2dec/jbig2_text.c \
 	jbig2dec/jbig2dec.c \
-	jbig2dec/sha1.c
+	jbig2dec/sha1.c \
+	jbig2dec/memento.c
 
 #	jbig2dec/getopt.c
 #	jbig2dec/getopt1.c
@@ -106,6 +107,7 @@ MY_JBIG2DEC_SRC_FILES := \
 MY_OPENJPEG_SRC_FILES := \
 	openjpeg/bio.c \
 	openjpeg/cio.c \
+	openjpeg/cidx_manager.c \
 	openjpeg/dwt.c \
 	openjpeg/event.c \
 	openjpeg/image.c \
@@ -116,12 +118,16 @@ MY_OPENJPEG_SRC_FILES := \
 	openjpeg/mct.c \
 	openjpeg/mqc.c \
 	openjpeg/openjpeg.c \
+	openjpeg/phix_manager.c \
 	openjpeg/pi.c \
+	openjpeg/ppix_manager.c \
 	openjpeg/raw.c \
 	openjpeg/t1.c \
 	openjpeg/t2.c \
 	openjpeg/tcd.c \
-	openjpeg/tgt.c
+	openjpeg/tgt.c \
+	openjpeg/thix_manager.c \
+	openjpeg/tpix_manager.c
 
 
 # mupdf
@@ -149,7 +155,7 @@ MY_MUPDF_C_INCLUDES := \
 # of Androids own droid.ttf ... Maybe resort to pointing
 # to it in the filesystem? But this would violate proper
 # API use. Bleh.
-MY_MUPDF_CFLAGS := -DNOCJK
+MY_MUPDF_CFLAGS := -DAA_BITS=8
 
 MY_MUPDF_SRC_FILES := \
 	mupdf/pdf/pdf_annot.c \
@@ -160,24 +166,31 @@ MY_MUPDF_SRC_FILES := \
 	mupdf/pdf/pdf_colorspace.c \
 	mupdf/pdf/pdf_crypt.c \
 	mupdf/pdf/pdf_encoding.c \
+	mupdf/pdf/pdf_event.c \
 	mupdf/pdf/pdf_font.c \
 	mupdf/pdf/pdf_fontfile.c \
+	mupdf/pdf/pdf_form.c \
 	mupdf/pdf/pdf_function.c \
 	mupdf/pdf/pdf_image.c \
 	mupdf/pdf/pdf_interpret.c \
+	mupdf/pdf/pdf_js_none.c \
 	mupdf/pdf/pdf_lex.c \
 	mupdf/pdf/pdf_metrics.c \
 	mupdf/pdf/pdf_nametree.c \
+	mupdf/pdf/pdf_object.c \
 	mupdf/pdf/pdf_outline.c \
 	mupdf/pdf/pdf_page.c \
 	mupdf/pdf/pdf_parse.c \
 	mupdf/pdf/pdf_pattern.c \
 	mupdf/pdf/pdf_repair.c \
 	mupdf/pdf/pdf_shade.c \
+	mupdf/pdf/pdf_store.c \
 	mupdf/pdf/pdf_stream.c \
 	mupdf/pdf/pdf_type3.c \
 	mupdf/pdf/pdf_unicode.c \
+	mupdf/pdf/pdf_write.c \
 	mupdf/pdf/pdf_xobject.c \
+	mupdf/pdf/pdf_xref_aux.c \
 	mupdf/pdf/pdf_xref.c \
 	mupdf/xps/xps_common.c \
 	mupdf/xps/xps_doc.c \
@@ -191,7 +204,6 @@ MY_MUPDF_SRC_FILES := \
 	mupdf/xps/xps_util.c \
 	mupdf/xps/xps_xml.c \
 	mupdf/xps/xps_zip.c \
-	mupdf/draw/arch_port.c \
 	mupdf/draw/draw_affine.c \
 	mupdf/draw/draw_blend.c \
 	mupdf/draw/draw_device.c \
@@ -205,17 +217,19 @@ MY_MUPDF_SRC_FILES := \
 	mupdf/fitz/base_context.c \
 	mupdf/fitz/base_error.c \
 	mupdf/fitz/base_hash.c \
-	mupdf/fitz/base_link.c \
 	mupdf/fitz/base_memory.c \
-	mupdf/fitz/base_object.c \
 	mupdf/fitz/base_string.c \
 	mupdf/fitz/base_geometry.c \
+	mupdf/fitz/base_trans.c \
 	mupdf/fitz/crypt_aes.c \
 	mupdf/fitz/crypt_arc4.c \
 	mupdf/fitz/crypt_md5.c \
 	mupdf/fitz/crypt_sha2.c \
+	mupdf/fitz/doc_document.c \
 	mupdf/fitz/doc_outline.c \
+	mupdf/fitz/doc_link.c \
 	mupdf/fitz/stm_buffer.c \
+	mupdf/fitz/stm_comp_buf.c \
 	mupdf/fitz/stm_open.c \
 	mupdf/fitz/stm_read.c \
 	mupdf/fitz/filt_basic.c \
@@ -226,6 +240,8 @@ MY_MUPDF_SRC_FILES := \
 	mupdf/fitz/filt_predict.c \
 	mupdf/fitz/filt_jbig2d.c \
 	mupdf/fitz/image_png.c \
+	mupdf/fitz/image_save.c \
+	mupdf/fitz/image_md5.c \
 	mupdf/fitz/image_jpeg.c \
 	mupdf/fitz/image_jpx.c \
 	mupdf/fitz/image_tiff.c \
@@ -252,14 +268,9 @@ MY_MUPDF_SRC_FILES := \
 # uses libz, which is officially supported for NDK API
 MY_MUPDF_LDLIBS := -lz
 
-#Build for ARM architecture. Instead of Thumb
-ifneq ($(TARGET_ARCH_ABI),x86)
-ifneq ($(TARGET_ARCH_ABI),mips)
-    MY_MUPDF_CFLAGS +=  -DARCH_ARM -DARCH_ARM_CAN_LOAD_UNALIGNED
+ifeq ($(TARGET_ARCH_ABI),armeabi)
     LOCAL_ARM_MODE := arm
-endif # TARGET_ARCH_ABI != mips
-endif # TARGET_ARCH_ABI != x86
-
+endif # TARGET_ARCH_ABI == armeabi
 
 LOCAL_CFLAGS := \
 	$(MY_FREETYPE_CFLAGS) \

@@ -1,4 +1,4 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 #include <jpeglib.h>
 #include <setjmp.h>
@@ -12,6 +12,7 @@ struct fz_dctd_s
 	int color_transform;
 	int init;
 	int stride;
+	int factor;
 	unsigned char *scanline;
 	unsigned char *rp, *wp;
 	struct jpeg_decompress_struct cinfo;
@@ -100,11 +101,17 @@ read_dctd(fz_stream *stm, unsigned char *buf, int len)
 
 	if (!state->init)
 	{
+		int c;
 		cinfo->client_data = state;
 		cinfo->err = &state->errmgr;
 		jpeg_std_error(cinfo->err);
 		cinfo->err->error_exit = error_exit;
 		jpeg_create_decompress(cinfo);
+		state->init = 1;
+
+		/* Skip over any stray returns at the start of the stream */
+		while ((c = fz_peek_byte(state->chain)) == '\n' || c == '\r')
+			(void)fz_read_byte(state->chain);
 
 		cinfo->src = &state->srcmgr;
 		cinfo->src->init_source = init_source;
@@ -150,14 +157,15 @@ read_dctd(fz_stream *stm, unsigned char *buf, int len)
 			break;
 		}
 
+		cinfo->scale_num = 8/state->factor;
+		cinfo->scale_denom = 8;
+
 		jpeg_start_decompress(cinfo);
 
 		state->stride = cinfo->output_width * cinfo->output_components;
 		state->scanline = fz_malloc(state->ctx, state->stride);
 		state->rp = state->scanline;
 		state->wp = state->scanline;
-
-		state->init = 1;
 	}
 
 	while (state->rp < state->wp && p < ep)
@@ -216,6 +224,12 @@ skip:
 fz_stream *
 fz_open_dctd(fz_stream *chain, int color_transform)
 {
+	return fz_open_resized_dctd(chain, color_transform, 1);
+}
+
+fz_stream *
+fz_open_resized_dctd(fz_stream *chain, int color_transform, int factor)
+{
 	fz_context *ctx = chain->ctx;
 	fz_dctd *state = NULL;
 
@@ -224,11 +238,11 @@ fz_open_dctd(fz_stream *chain, int color_transform)
 	fz_try(ctx)
 	{
 		state = fz_malloc_struct(chain->ctx, fz_dctd);
-		memset(state, 0, sizeof(fz_dctd));
 		state->ctx = ctx;
 		state->chain = chain;
 		state->color_transform = color_transform;
 		state->init = 0;
+		state->factor = factor;
 	}
 	fz_catch(ctx)
 	{

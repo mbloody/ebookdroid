@@ -1,4 +1,4 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 #define OPJ_STATIC
 #include <openjpeg.h>
@@ -21,7 +21,7 @@ static void fz_opj_info_callback(const char *msg, void *client_data)
 }
 
 fz_pixmap *
-fz_load_jpx(fz_context *ctx, unsigned char *data, int size, fz_colorspace *defcs)
+fz_load_jpx(fz_context *ctx, unsigned char *data, int size, fz_colorspace *defcs, int indexed)
 {
 	fz_pixmap *img;
 	opj_event_mgr_t evtmgr;
@@ -50,6 +50,8 @@ fz_load_jpx(fz_context *ctx, unsigned char *data, int size, fz_colorspace *defcs
 	evtmgr.info_handler = fz_opj_info_callback;
 
 	opj_set_default_decoder_parameters(&params);
+	if (indexed)
+		params.flags |= OPJ_DPARAMETERS_IGNORE_PCLR_CMAP_CDEF_FLAG;
 
 	info = opj_create_decompress(format);
 	opj_set_event_mgr((opj_common_ptr)info, &evtmgr, ctx);
@@ -68,11 +70,20 @@ fz_load_jpx(fz_context *ctx, unsigned char *data, int size, fz_colorspace *defcs
 	for (k = 1; k < jpx->numcomps; k++)
 	{
 		if (jpx->comps[k].w != jpx->comps[0].w)
+		{
+			opj_image_destroy(jpx);
 			fz_throw(ctx, "image components have different width");
+		}
 		if (jpx->comps[k].h != jpx->comps[0].h)
+		{
+			opj_image_destroy(jpx);
 			fz_throw(ctx, "image components have different height");
+		}
 		if (jpx->comps[k].prec != jpx->comps[0].prec)
+		{
+			opj_image_destroy(jpx);
 			fz_throw(ctx, "image components have different precision");
+		}
 	}
 
 	n = jpx->numcomps;
@@ -144,11 +155,11 @@ fz_load_jpx(fz_context *ctx, unsigned char *data, int size, fz_colorspace *defcs
 		if (n == 4)
 		{
 			fz_pixmap *tmp = fz_new_pixmap(ctx, fz_device_rgb, w, h);
-			fz_convert_pixmap(ctx, img, tmp);
+			fz_convert_pixmap(ctx, tmp, img);
 			fz_drop_pixmap(ctx, img);
 			img = tmp;
 		}
-		fz_premultiply_pixmap(img);
+		fz_premultiply_pixmap(ctx, img);
 	}
 
 	opj_image_destroy(jpx);

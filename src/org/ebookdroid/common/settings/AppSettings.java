@@ -1,29 +1,36 @@
 package org.ebookdroid.common.settings;
 
 import org.ebookdroid.common.settings.books.BookSettings;
+import org.ebookdroid.common.settings.definitions.AppPreferences;
+import org.ebookdroid.common.settings.definitions.BookPreferences;
+import org.ebookdroid.common.settings.listeners.IAppSettingsChangeListener;
+import org.ebookdroid.common.settings.types.BookRotationType;
 import org.ebookdroid.common.settings.types.DocumentViewMode;
-import org.ebookdroid.common.settings.types.DocumentViewType;
 import org.ebookdroid.common.settings.types.FontSize;
 import org.ebookdroid.common.settings.types.PageAlign;
 import org.ebookdroid.common.settings.types.RotationType;
 import org.ebookdroid.common.settings.types.ToastPosition;
 import org.ebookdroid.core.curl.PageAnimationType;
+import org.ebookdroid.droids.fb2.codec.parsers.FB2Parsers;
 
-import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
-import android.preference.PreferenceManager;
 
-import java.util.Set;
+import org.emdev.common.backup.BackupManager;
+import org.emdev.common.backup.IBackupAgent;
+import org.emdev.common.settings.backup.SettingsBackupHelper;
+import org.emdev.utils.CompareUtils;
+import org.json.JSONObject;
 
-import org.emdev.utils.android.AndroidVersion;
-import org.emdev.utils.filesystem.FileExtensionFilter;
+public class AppSettings implements AppPreferences, BookPreferences, IBackupAgent {
 
-public class AppSettings implements AppPreferences {
+    public static final String BACKUP_KEY = "app-settings";
 
-    final SharedPreferences prefs;
+    private static AppSettings current;
 
     /* =============== UI settings =============== */
+
+    public final String lang;
 
     public final boolean loadRecent;
 
@@ -55,8 +62,6 @@ public class AppSettings implements AppPreferences {
 
     public final int scrollHeight;
 
-    public final int touchProcessingDelay;
-
     public final boolean animateScrolling;
 
     /* =============== Tap & Keyboard settings =============== */
@@ -65,43 +70,59 @@ public class AppSettings implements AppPreferences {
 
     public final String keysBinding;
 
+    /* =============== Navigation & History settings =============== */
+
+    public final boolean showBookmarksInMenu;
+
+    public final int linkHighlightColor;
+
+    public final int searchHighlightColor;
+
+    public final int currentSearchHighlightColor;
+
+    public final boolean storeGotoHistory;
+
+    public final boolean storeLinkGotoHistory;
+
+    public final boolean storeOutlineGotoHistory;
+
+    public final boolean storeSearchGotoHistory;
+
     /* =============== Performance settings =============== */
 
     public final int pagesInMemory;
 
-    public final DocumentViewType viewType;
+    public final int decodingThreads;
 
     public final int decodingThreadPriority;
 
     public final int drawThreadPriority;
 
-    public final boolean useNativeGraphics;
-
-    public final boolean hwaEnabled;
+    public final boolean decodingOnScroll;
 
     public final int bitmapSize;
 
-    public final boolean bitmapFileringEnabled;
+    public final int heapPreallocate;
 
-    public final boolean textureReuseEnabled;
-
-    public final boolean useBitmapHack;
-
-    public final boolean useEarlyRecycling;
-
-    public final boolean reloadDuringZoom;
+    public final int pdfStorageSize;
 
     /* =============== Default rendering settings =============== */
 
     public final boolean nightMode;
 
+    public boolean positiveImagesInNightMode;
+
     final int contrast;
+
+    final int gamma;
 
     final int exposure;
 
     final boolean autoLevels;
 
     final boolean splitPages;
+
+    final boolean splitRTL;
 
     final boolean cropPages;
 
@@ -111,9 +132,11 @@ public class AppSettings implements AppPreferences {
 
     final PageAnimationType animationType;
 
-    /* =============== Format-specific settings =============== */
+    /* =============== DjVU Format-specific settings =============== */
 
     public final int djvuRenderingMode;
+
+    /* =============== PDF Format-specific settings =============== */
 
     public final boolean useCustomDpi;
 
@@ -121,23 +144,37 @@ public class AppSettings implements AppPreferences {
 
     public final int yDpi;
 
+    public final String monoFontPack;
+
+    public final String sansFontPack;
+
+    public final String serifFontPack;
+
+    public final String symbolFontPack;
+
+    public final String dingbatFontPack;
+
+    public final boolean slowCMYK;
+
+    /* =============== FB2 Format-specific settings =============== */
+
+    public final FB2Parsers fb2XmlParser;
+
+    public final String fb2FontPack;
+
     public final FontSize fontSize;
 
     public final boolean fb2HyphenEnabled;
 
-    /* =============== Browser settings =============== */
+    public final boolean fb2CacheImagesOnDisk;
 
-    public final boolean useBookcase;
+    /* =============================================== */
 
-    public final Set<String> autoScanDirs;
-
-    public final String searchBookQuery;
-
-    public final FileExtensionFilter allowedFileTypes;
-
-    AppSettings(final Context context) {
-        this.prefs = PreferenceManager.getDefaultSharedPreferences(context);
+    private AppSettings() {
+        BackupManager.addAgent(this);
+        final SharedPreferences prefs = SettingsManager.prefs;
         /* =============== UI settings =============== */
+        lang = LANG.getPreferenceValue(prefs);
         loadRecent = LOAD_RECENT.getPreferenceValue(prefs);
         confirmClose = CONFIRM_CLOSE.getPreferenceValue(prefs);
         brightnessInNightModeOnly = BRIGHTNESS_NIGHT_MODE_ONLY.getPreferenceValue(prefs);
@@ -153,46 +190,59 @@ public class AppSettings implements AppPreferences {
         /* =============== Tap & Scroll settings =============== */
         tapsEnabled = TAPS_ENABLED.getPreferenceValue(prefs);
         scrollHeight = SCROLL_HEIGHT.getPreferenceValue(prefs);
-        touchProcessingDelay = TOUCH_DELAY.getPreferenceValue(prefs);
         animateScrolling = ANIMATE_SCROLLING.getPreferenceValue(prefs);
+        /* =============== Navigation & History settings =============== */
+        showBookmarksInMenu = SHOW_BOOKMARKs_MENU.getPreferenceValue(prefs);
+        linkHighlightColor = LINK_HIGHLIGHT_COLOR.getPreferenceValue(prefs);
+        searchHighlightColor = SEARCH_HIGHLIGHT_COLOR.getPreferenceValue(prefs);
+        currentSearchHighlightColor = CURRENT_SEARCH_HIGHLIGHT_COLOR.getPreferenceValue(prefs);
+        storeGotoHistory = STORE_GOTO_HISTORY.getPreferenceValue(prefs);
+        storeLinkGotoHistory = STORE_LINK_GOTO_HISTORY.getPreferenceValue(prefs);
+        storeOutlineGotoHistory = STORE_OUTLINE_GOTO_HISTORY.getPreferenceValue(prefs);
+        storeSearchGotoHistory = STORE_SEARCH_GOTO_HISTORY.getPreferenceValue(prefs);
         /* =============== Tap & Keyboard settings =============== */
         tapProfiles = TAP_PROFILES.getPreferenceValue(prefs);
         keysBinding = KEY_BINDINGS.getPreferenceValue(prefs);
         /* =============== Performance settings =============== */
         pagesInMemory = PAGES_IN_MEMORY.getPreferenceValue(prefs);
-        viewType = VIEW_TYPE.getPreferenceValue(prefs);
+        decodingThreads = DECODING_THREADS.getPreferenceValue(prefs);
         decodingThreadPriority = DECODE_THREAD_PRIORITY.getPreferenceValue(prefs);
         drawThreadPriority = DRAW_THREAD_PRIORITY.getPreferenceValue(prefs);
-        useNativeGraphics = USE_NATIVE_GRAPHICS.getPreferenceValue(prefs);
-        hwaEnabled = HWA_ENABLED.getPreferenceValue(prefs);
+        decodingOnScroll = DECODING_ON_SCROLL.getPreferenceValue(prefs);
         bitmapSize = BITMAP_SIZE.getPreferenceValue(prefs);
-        bitmapFileringEnabled = BITMAP_FILTERING.getPreferenceValue(prefs);
-        textureReuseEnabled = REUSE_TEXTURES.getPreferenceValue(prefs);
-        useBitmapHack = USE_BITMAP_HACK.getPreferenceValue(prefs);
-        useEarlyRecycling = EARLY_RECYCLING.getPreferenceValue(prefs);
-        reloadDuringZoom = RELOAD_DURING_ZOOM.getPreferenceValue(prefs);
+        heapPreallocate = HEAP_PREALLOCATE.getPreferenceValue(prefs);
+        pdfStorageSize = PDF_STORAGE_SIZE.getPreferenceValue(prefs);
         /* =============== Default rendering settings =============== */
         nightMode = NIGHT_MODE.getPreferenceValue(prefs);
+        positiveImagesInNightMode = NIGHT_MODE_POS_IMAGES.getPreferenceValue(prefs);
         contrast = CONTRAST.getPreferenceValue(prefs);
+        gamma = GAMMA.getPreferenceValue(prefs);
         exposure = EXPOSURE.getPreferenceValue(prefs);
         autoLevels = AUTO_LEVELS.getPreferenceValue(prefs);
         splitPages = SPLIT_PAGES.getPreferenceValue(prefs);
+        splitRTL = SPLIT_RTL.getPreferenceValue(prefs);
         cropPages = CROP_PAGES.getPreferenceValue(prefs);
         viewMode = VIEW_MODE.getPreferenceValue(prefs);
         pageAlign = PAGE_ALIGN.getPreferenceValue(prefs);
         animationType = ANIMATION_TYPE.getPreferenceValue(prefs);
-        /* =============== Format-specific settings =============== */
+        /* =============== DjVU Format-specific settings =============== */
         djvuRenderingMode = DJVU_RENDERING_MODE.getPreferenceValue(prefs);
+        /* =============== PDF Format-specific settings =============== */
         useCustomDpi = PDF_CUSTOM_DPI.getPreferenceValue(prefs);
         xDpi = PDF_CUSTOM_XDPI.getPreferenceValue(prefs);
         yDpi = PDF_CUSTOM_YDPI.getPreferenceValue(prefs);
+        monoFontPack = MONO_FONT_PACK.getPreferenceValue(prefs);
+        sansFontPack = SANS_FONT_PACK.getPreferenceValue(prefs);
+        serifFontPack = SERIF_FONT_PACK.getPreferenceValue(prefs);
+        symbolFontPack = SYMBOL_FONT_PACK.getPreferenceValue(prefs);
+        dingbatFontPack = DINGBAT_FONT_PACK.getPreferenceValue(prefs);
+        slowCMYK = PDF_SLOW_CMYK.getPreferenceValue(prefs);
+        /* =============== FB2 Format-specific settings =============== */
+        fb2XmlParser = FB2_XML_PARSER.getPreferenceValue(prefs);
+        fb2FontPack = FB2_FONT_PACK.getPreferenceValue(prefs);
         fontSize = FB2_FONT_SIZE.getPreferenceValue(prefs);
         fb2HyphenEnabled = FB2_HYPHEN.getPreferenceValue(prefs);
-        /* =============== Browser settings =============== */
-        useBookcase = USE_BOOK_CASE.getPreferenceValue(prefs);
-        autoScanDirs = AUTO_SCAN_DIRS.getPreferenceValue(prefs);
-        searchBookQuery = SEARCH_BOOK_QUERY.getPreferenceValue(prefs);
-        allowedFileTypes = FILE_TYPE_FILTER.getPreferenceValue(prefs);
+        fb2CacheImagesOnDisk = FB2_CACHE_IMAGES.getPreferenceValue(prefs);
     }
 
     /* =============== UI settings =============== */
@@ -209,59 +259,178 @@ public class AppSettings implements AppPreferences {
         return useCustomDpi ? yDpi : def;
     }
 
-    /* =============== Browser settings =============== */
+    /* =============== */
 
-    public boolean getUseBookcase() {
-        return !AndroidVersion.is1x && useBookcase;
+    public static void init() {
+        current = new AppSettings();
+    }
+
+    public static AppSettings current() {
+        SettingsManager.lock.readLock().lock();
+        try {
+            return current;
+        } finally {
+            SettingsManager.lock.readLock().unlock();
+        }
+    }
+
+    public static void toggleFullScreen() {
+        SettingsManager.lock.writeLock().lock();
+        try {
+            final Editor edit = SettingsManager.prefs.edit();
+            AppPreferences.FULLSCREEN.setPreferenceValue(edit, !current.fullScreen);
+            edit.commit();
+            onSettingsChanged();
+        } finally {
+            SettingsManager.lock.writeLock().unlock();
+        }
+    }
+
+    public static void toggleTitleVisibility() {
+        SettingsManager.lock.writeLock().lock();
+        try {
+            final Editor edit = SettingsManager.prefs.edit();
+            AppPreferences.SHOW_TITLE.setPreferenceValue(edit, !current.showTitle);
+            edit.commit();
+            onSettingsChanged();
+        } finally {
+            SettingsManager.lock.writeLock().unlock();
+        }
+    }
+
+    public static void updateTapProfiles(final String profiles) {
+        SettingsManager.lock.writeLock().lock();
+        try {
+            final Editor edit = SettingsManager.prefs.edit();
+            AppPreferences.TAP_PROFILES.setPreferenceValue(edit, profiles);
+            edit.commit();
+            onSettingsChanged();
+        } finally {
+            SettingsManager.lock.writeLock().unlock();
+        }
+    }
+
+    public static void updateKeysBinding(final String json) {
+        SettingsManager.lock.writeLock().lock();
+        try {
+            final Editor edit = SettingsManager.prefs.edit();
+            AppPreferences.KEY_BINDINGS.setPreferenceValue(edit, json);
+            edit.commit();
+            onSettingsChanged();
+        } finally {
+            SettingsManager.lock.writeLock().unlock();
+        }
     }
 
     /* =============== */
 
-    void clearPseudoBookSettings() {
+    static void setDefaultSettings(final BookSettings bs) {
+        bs.nightMode = current.nightMode;
+        bs.positiveImagesInNightMode = current.positiveImagesInNightMode;
+        bs.contrast = current.contrast;
+        bs.gamma = current.gamma;
+        bs.exposure = current.exposure;
+        bs.autoLevels = current.autoLevels;
+        bs.splitPages = current.splitPages;
+        bs.splitRTL = current.splitRTL;
+        bs.cropPages = current.cropPages;
+        bs.viewMode = current.viewMode;
+        bs.pageAlign = current.pageAlign;
+        bs.animationType = current.animationType;
+    }
+
+    static void fillBookSettings(final BookSettings bs) {
+        final SharedPreferences prefs = SettingsManager.prefs;
+        bs.nightMode = BOOK_NIGHT_MODE.getPreferenceValue(prefs, current.nightMode);
+        bs.positiveImagesInNightMode = BOOK_NIGHT_MODE_POS_IMAGES.getPreferenceValue(prefs, current.positiveImagesInNightMode);
+        bs.contrast = BOOK_CONTRAST.getPreferenceValue(prefs, current.contrast);
+        bs.gamma = BOOK_GAMMA.getPreferenceValue(prefs, current.gamma);
+        bs.exposure = BOOK_EXPOSURE.getPreferenceValue(prefs, current.exposure);
+        bs.autoLevels = BOOK_AUTO_LEVELS.getPreferenceValue(prefs, current.autoLevels);
+        bs.splitPages = BOOK_SPLIT_PAGES.getPreferenceValue(prefs, current.splitPages);
+        bs.splitRTL = BOOK_SPLIT_RTL.getPreferenceValue(prefs, current.splitRTL);
+        bs.cropPages = BOOK_CROP_PAGES.getPreferenceValue(prefs, current.cropPages);
+        bs.rotation = BOOK_ROTATION.getPreferenceValue(prefs, BookRotationType.UNSPECIFIED);
+        bs.viewMode = BOOK_VIEW_MODE.getPreferenceValue(prefs, current.viewMode);
+        bs.pageAlign = BOOK_PAGE_ALIGN.getPreferenceValue(prefs, current.pageAlign);
+        bs.animationType = BOOK_ANIMATION_TYPE.getPreferenceValue(prefs, current.animationType);
+        bs.firstPageOffset = BOOK_FIRST_PAGE_OFFSET.getPreferenceValue(prefs);
+    }
+
+    static void clearPseudoBookSettings() {
+        final SharedPreferences prefs = SettingsManager.prefs;
         final Editor edit = prefs.edit();
         edit.remove(BOOK.key);
         edit.remove(BOOK_NIGHT_MODE.key);
+        edit.remove(BOOK_NIGHT_MODE_POS_IMAGES.key);
         edit.remove(BOOK_CONTRAST.key);
+        edit.remove(BOOK_GAMMA.key);
         edit.remove(BOOK_EXPOSURE.key);
         edit.remove(BOOK_AUTO_LEVELS.key);
         edit.remove(BOOK_SPLIT_PAGES.key);
+        edit.remove(BOOK_SPLIT_RTL.key);
         edit.remove(BOOK_CROP_PAGES.key);
+        edit.remove(BOOK_ROTATION.key);
         edit.remove(BOOK_VIEW_MODE.key);
         edit.remove(BOOK_PAGE_ALIGN.key);
         edit.remove(BOOK_ANIMATION_TYPE.key);
+        edit.remove(BOOK_FIRST_PAGE_OFFSET.key);
         edit.commit();
     }
 
-    void updatePseudoBookSettings(final BookSettings bs) {
+    static void updatePseudoBookSettings(final BookSettings bs) {
+        final SharedPreferences prefs = SettingsManager.prefs;
         final Editor edit = prefs.edit();
         BOOK.setPreferenceValue(edit, bs.fileName);
         BOOK_NIGHT_MODE.setPreferenceValue(edit, bs.nightMode);
+        BOOK_NIGHT_MODE_POS_IMAGES.setPreferenceValue(edit, bs.positiveImagesInNightMode);
         BOOK_CONTRAST.setPreferenceValue(edit, bs.contrast);
+        BOOK_GAMMA.setPreferenceValue(edit, bs.gamma);
         BOOK_EXPOSURE.setPreferenceValue(edit, bs.exposure);
         BOOK_AUTO_LEVELS.setPreferenceValue(edit, bs.autoLevels);
         BOOK_SPLIT_PAGES.setPreferenceValue(edit, bs.splitPages);
+        BOOK_SPLIT_RTL.setPreferenceValue(edit, bs.splitRTL);
         BOOK_CROP_PAGES.setPreferenceValue(edit, bs.cropPages);
+        BOOK_ROTATION.setPreferenceValue(edit, bs.rotation);
         BOOK_VIEW_MODE.setPreferenceValue(edit, bs.viewMode);
         BOOK_PAGE_ALIGN.setPreferenceValue(edit, bs.pageAlign);
         BOOK_ANIMATION_TYPE.setPreferenceValue(edit, bs.animationType);
+        BOOK_FIRST_PAGE_OFFSET.setPreferenceValue(edit, bs.firstPageOffset);
         edit.commit();
     }
 
-    void fillBookSettings(final BookSettings bs) {
-        bs.nightMode = BOOK_NIGHT_MODE.getPreferenceValue(prefs, nightMode);
-        bs.contrast = BOOK_CONTRAST.getPreferenceValue(prefs, contrast);
-        bs.exposure = BOOK_EXPOSURE.getPreferenceValue(prefs, exposure);
-        bs.autoLevels = BOOK_AUTO_LEVELS.getPreferenceValue(prefs, autoLevels);
-        bs.splitPages = BOOK_SPLIT_PAGES.getPreferenceValue(prefs, splitPages);
-        bs.cropPages = BOOK_CROP_PAGES.getPreferenceValue(prefs, cropPages);
-        bs.viewMode = BOOK_VIEW_MODE.getPreferenceValue(prefs, viewMode);
-        bs.pageAlign = BOOK_PAGE_ALIGN.getPreferenceValue(prefs, pageAlign);
-        bs.animationType = BOOK_ANIMATION_TYPE.getPreferenceValue(prefs, animationType);
+    static Diff onSettingsChanged() {
+        final AppSettings oldAppSettings = current;
+        current = new AppSettings();
+        return applySettingsChanges(oldAppSettings, current);
+    }
+
+    static AppSettings.Diff applySettingsChanges(final AppSettings oldSettings, final AppSettings newSettings) {
+        final AppSettings.Diff diff = new AppSettings.Diff(oldSettings, newSettings);
+        final IAppSettingsChangeListener l = SettingsManager.listeners.getListener();
+        l.onAppSettingsChanged(oldSettings, newSettings, diff);
+        return diff;
+    }
+
+    @Override
+    public String key() {
+        return BACKUP_KEY;
+    }
+
+    @Override
+    public JSONObject backup() {
+        return SettingsBackupHelper.backup(BACKUP_KEY, SettingsManager.prefs, AppPreferences.class);
+    }
+
+    @Override
+    public void restore(final JSONObject backup) {
+        SettingsBackupHelper.restore(BACKUP_KEY, SettingsManager.prefs, AppPreferences.class, backup);
+        onSettingsChanged();
     }
 
     public static class Diff {
 
-        // private static final int D_NightMode = 0x0001 << 0;
+        private static final int D_Lang = 0x0001 << 0;
         private static final int D_Rotation = 0x0001 << 1;
         private static final int D_FullScreen = 0x0001 << 2;
         private static final int D_ShowTitle = 0x0001 << 3;
@@ -288,9 +457,9 @@ public class AppSettings implements AppPreferences {
             if (firstTime) {
                 mask = 0xFFFFFFFF;
             } else if (news != null) {
-                // if (olds.nightMode != news.nightMode) {
-                // mask |= D_NightMode;
-                // }
+                if (CompareUtils.compare(olds.lang, news.lang) != 0) {
+                    mask |= D_Lang;
+                }
                 if (olds.rotation != news.rotation) {
                     mask |= D_Rotation;
                 }
@@ -324,17 +493,8 @@ public class AppSettings implements AppPreferences {
                 if (olds.loadRecent != news.loadRecent) {
                     mask |= D_LoadRecent;
                 }
-                if (olds.getUseBookcase() != news.getUseBookcase()) {
-                    mask |= D_UseBookcase;
-                }
                 if (olds.djvuRenderingMode != news.djvuRenderingMode) {
                     mask |= D_DjvuRenderingMode;
-                }
-                if (!olds.autoScanDirs.equals(news.autoScanDirs)) {
-                    mask |= D_AutoScanDirs;
-                }
-                if (!olds.allowedFileTypes.equals(news.allowedFileTypes)) {
-                    mask |= D_AllowedFileTypes;
                 }
                 if (!olds.tapProfiles.equals(news.tapProfiles)) {
                     mask |= D_TapConfigChanged;
@@ -349,9 +509,9 @@ public class AppSettings implements AppPreferences {
             return firstTime;
         }
 
-        // public boolean isNightModeChanged() {
-        // return 0 != (mask & D_NightMode);
-        // }
+        public boolean isLangChanged() {
+            return 0 != (mask & D_Lang);
+        }
 
         public boolean isRotationChanged() {
             return 0 != (mask & D_Rotation);

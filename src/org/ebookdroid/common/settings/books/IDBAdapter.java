@@ -1,6 +1,5 @@
 package org.ebookdroid.common.settings.books;
 
-import org.ebookdroid.common.log.LogContext;
 
 import android.database.sqlite.SQLiteDatabase;
 
@@ -8,21 +7,28 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
+
 interface IDBAdapter {
 
-    LogContext LCTX = LogContext.ROOT.lctx("DBAdapter");
+    LogContext LCTX = LogManager.root().lctx("DBAdapter", false);
 
     void onCreate(final SQLiteDatabase db);
 
     void onDestroy(final SQLiteDatabase db);
 
-    Map<String, BookSettings> getBookSettings(final boolean all);
+    Map<String, BookSettings> getAllBooks();
 
-    BookSettings getBookSettings(final String fileName);
+    Map<String, BookSettings> getRecentBooks(boolean all);
 
-    boolean storeBookSettings(final BookSettings bs);
+    BookSettings getBookSettings(String fileName);
 
-    boolean storeBookSettings(final Collection<BookSettings> bs);
+    boolean storeBookSettings(BookSettings bs);
+
+    boolean storeBookSettings(List<BookSettings> list);
+
+    boolean restoreBookSettings(Collection<BookSettings> c);
 
     boolean clearRecent();
 
@@ -30,10 +36,11 @@ interface IDBAdapter {
 
     boolean deleteAll();
 
-    boolean updateBookmarks(final BookSettings book);
+    boolean updateBookmarks(BookSettings book);
 
-    boolean deleteBookmarks(final String book, final List<Bookmark> bookmarks);
+    boolean deleteBookmarks(String book, List<Bookmark> bookmarks);
 
     boolean deleteAllBookmarks();
 
+    boolean removeBookFromRecents(BookSettings bs);
 }

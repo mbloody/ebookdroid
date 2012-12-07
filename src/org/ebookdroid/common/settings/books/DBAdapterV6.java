@@ -1,5 +1,6 @@
 package org.ebookdroid.common.settings.books;
 
+import org.ebookdroid.common.settings.types.BookRotationType;
 import org.ebookdroid.common.settings.types.DocumentViewMode;
 import org.ebookdroid.common.settings.types.PageAlign;
 import org.ebookdroid.core.PageIndex;
@@ -17,6 +18,14 @@ class DBAdapterV6 extends DBAdapterV5 {
     public static final long F_NIGHT_MODE = 1 << 2;
 
     public static final long F_AUTO_LEVELS = 1 << 3;
+
+    public static final long F_NIGHT_MODE_POS_IMAGES = 1 << 4;
+
+    public static final long F_ROTAION_OVR = 1 << 5;
+
+    public static final long F_ROTAION_LAND = 1 << 6;
+
+    public static final long F_SPLIT_RTL = 1 << 7;
 
     public static final String DB_BOOK_CREATE = "create table book_settings ("
     // Book file path
@@ -50,7 +59,9 @@ class DBAdapterV6 extends DBAdapterV5 {
     //
     ;
 
-    public static final String DB_BOOK_GET_ALL = "SELECT book, last_updated, doc_page, view_page, zoom, view_mode, page_align, page_animation, flags, offset_x, offset_y, contrast, exposure FROM book_settings where last_updated > 0 ORDER BY last_updated DESC";
+    public static final String DB_BOOK_GET_ALL = "SELECT book, last_updated, doc_page, view_page, zoom, view_mode, page_align, page_animation, flags, offset_x, offset_y, contrast, exposure FROM book_settings ORDER BY book ASC";
+
+    public static final String DB_BOOK_GET_RNT = "SELECT book, last_updated, doc_page, view_page, zoom, view_mode, page_align, page_animation, flags, offset_x, offset_y, contrast, exposure FROM book_settings where last_updated > 0 ORDER BY last_updated DESC";
 
     public static final String DB_BOOK_GET_ONE = "SELECT book, last_updated, doc_page, view_page, zoom, view_mode, page_align, page_animation, flags, offset_x, offset_y, contrast, exposure FROM book_settings WHERE book=?";
 
@@ -67,8 +78,13 @@ class DBAdapterV6 extends DBAdapterV5 {
     }
 
     @Override
-    public Map<String, BookSettings> getBookSettings(final boolean all) {
-        return getBookSettings(DB_BOOK_GET_ALL, all);
+    public Map<String, BookSettings> getAllBooks() {
+        return getBookSettings(DB_BOOK_GET_ALL, true);
+    }
+
+    @Override
+    public Map<String, BookSettings> getRecentBooks(final boolean all) {
+        return getBookSettings(DB_BOOK_GET_RNT, all);
     }
 
     @Override
@@ -78,8 +94,6 @@ class DBAdapterV6 extends DBAdapterV5 {
 
     @Override
     protected void storeBookSettings(final BookSettings bs, final SQLiteDatabase db) {
-        bs.lastUpdated = System.currentTimeMillis();
-
         final Object[] args = new Object[] {
                 // File name
                 bs.fileName,
@@ -98,7 +112,7 @@ class DBAdapterV6 extends DBAdapterV5 {
                 // Page animation type
                 bs.animationType.ordinal(),
                 // Flags
-                (bs.splitPages ? F_SPLIT_PAGES : 0) | (bs.cropPages ? F_CROP_PAGES : 0) | (bs.nightMode ? F_NIGHT_MODE : 0) | (bs.autoLevels ? F_AUTO_LEVELS : 0),
+                getFlags(bs),
                 // Offset x
                 (int) (bs.offsetX * OFFSET_FACTOR),
                 // Offset y
@@ -127,11 +141,7 @@ class DBAdapterV6 extends DBAdapterV5 {
         bs.pageAlign = PageAlign.values()[c.getInt(index++)];
         bs.animationType = PageAnimationType.values()[c.getInt(index++)];
 
-        long flags = c.getLong(index++);
-        bs.splitPages = (flags & F_SPLIT_PAGES) != 0;
-        bs.cropPages = (flags & F_CROP_PAGES) != 0;
-        bs.nightMode = (flags & F_NIGHT_MODE) != 0;
-        bs.autoLevels = (flags & F_AUTO_LEVELS) != 0;
+        setFlags(bs, c.getLong(index++));
 
         bs.offsetX = c.getInt(index++) / OFFSET_FACTOR;
         bs.offsetY = c.getInt(index++) / OFFSET_FACTOR;
@@ -140,5 +150,47 @@ class DBAdapterV6 extends DBAdapterV5 {
         bs.exposure = c.getInt(index++);
 
         return bs;
+    }
+
+    protected long getFlags(final BookSettings bs) {
+        return
+        /* Split page flag */
+        (bs.splitPages ? F_SPLIT_PAGES : 0) |
+        /* Crop page flag */
+        (bs.cropPages ? F_CROP_PAGES : 0) |
+        /* Night mode flag */
+        (bs.nightMode ? F_NIGHT_MODE : 0) |
+        /* Auto-level flag */
+        (bs.autoLevels ? F_AUTO_LEVELS : 0) |
+        /* Positive image flag */
+        (bs.positiveImagesInNightMode ? F_NIGHT_MODE_POS_IMAGES : 0) |
+        /* Rotation flags */
+        getRotationFlags(bs) |
+        /* Positive image flag */
+        (bs.splitRTL ? F_SPLIT_RTL : 0);
+
+    }
+
+    protected long getRotationFlags(final BookSettings bs) {
+        if (bs.rotation == null || bs.rotation == BookRotationType.UNSPECIFIED) {
+            return 0;
+        }
+        return F_ROTAION_OVR | (bs.rotation == BookRotationType.LANDSCAPE ? F_ROTAION_LAND : 0);
+    }
+
+    protected void setFlags(final BookSettings bs, final long flags) {
+        bs.splitPages = (flags & F_SPLIT_PAGES) != 0;
+        bs.cropPages = (flags & F_CROP_PAGES) != 0;
+        bs.nightMode = (flags & F_NIGHT_MODE) != 0;
+        bs.positiveImagesInNightMode = (flags & F_NIGHT_MODE_POS_IMAGES) != 0;
+        bs.autoLevels = (flags & F_AUTO_LEVELS) != 0;
+
+        if ((flags & F_ROTAION_OVR) != 0) {
+            bs.rotation = (flags & F_ROTAION_LAND) != 0 ? BookRotationType.LANDSCAPE : BookRotationType.PORTRAIT;
+        } else {
+            bs.rotation = BookRotationType.UNSPECIFIED;
+        }
+
+        bs.splitRTL = (flags & F_SPLIT_RTL) != 0;
     }
 }

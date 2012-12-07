@@ -1,27 +1,28 @@
 package org.ebookdroid.ui.viewer;
 
 import org.ebookdroid.common.settings.types.PageAlign;
-import org.ebookdroid.core.EventDraw;
+import org.ebookdroid.core.EventGLDraw;
 import org.ebookdroid.core.Page;
 import org.ebookdroid.core.ViewState;
 import org.ebookdroid.core.events.ZoomListener;
-import org.ebookdroid.ui.viewer.IActivityController.IBookLoadTask;
 
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
+import org.emdev.ui.progress.IProgressIndicator;
+
 public interface IViewController extends ZoomListener {
 
-    void init(IBookLoadTask bookLoadTask);
+    void init(IProgressIndicator bookLoadTask);
 
     void show();
 
     /* Page related methods */
-    ViewState goToPage(int page);
+    void goToPage(int page);
 
-    ViewState goToPage(int page, float offsetX, float offsetY);
+    void goToPage(int page, float offsetX, float offsetY);
 
     void goToLink(int pageDocIndex, RectF targetRect, boolean addToHistory);
 
@@ -61,8 +62,8 @@ public interface IViewController extends ZoomListener {
 
     Rect getScrollLimits();
 
-    boolean isPageVisible(Page page, ViewState viewState);
-    
+    boolean isPageVisible(Page page, ViewState viewState, RectF outBounds);
+
     boolean onTouchEvent(MotionEvent ev);
 
     void onScrollChanged(int dX, final int dY);
@@ -71,11 +72,12 @@ public interface IViewController extends ZoomListener {
 
     void toggleRenderingEffects();
 
-    void drawView(EventDraw eventDraw);
+    void drawView(EventGLDraw eventGLDraw);
 
     void pageUpdated(ViewState viewState, Page page);
 
     void invalidateScroll();
 
     void onDestroy();
+
 }

@@ -1,10 +1,10 @@
 package org.emdev.ui.actions;
 
 import org.ebookdroid.R;
-import org.ebookdroid.common.log.LogContext;
 
 import android.content.DialogInterface;
 import android.content.DialogInterface.OnMultiChoiceClickListener;
+import android.util.SparseBooleanArray;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
@@ -19,15 +19,22 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
 import org.emdev.utils.LengthUtils;
+import org.emdev.utils.collections.SparseArrayEx;
 
 public class ActionEx implements Runnable, View.OnClickListener, View.OnLongClickListener,
         AdapterView.OnItemClickListener, DialogInterface.OnClickListener, OnMultiChoiceClickListener,
         TextView.OnEditorActionListener {
 
-    private static final LogContext LCTX = LogContext.ROOT.lctx("Actions");
+    private static final LogContext LCTX = LogManager.root().lctx("Actions");
 
     private static final String SHORT_DESCRIPTION = "ShortDescription";
+
+    private static SparseArrayEx<String> s_names;
+
+    private static Map<String, Integer> s_ids;
 
     public final int id;
 
@@ -177,10 +184,9 @@ public class ActionEx implements Runnable, View.OnClickListener, View.OnLongClic
                 LCTX.d("Action  " + name + ": disabled");
                 return;
             }
-            final ActionControllerMethod method = getMethod();
             setParameters();
             LCTX.d("Execute action: " + name + ": " + m_values);
-            method.invoke(this);
+            m_method.invoke(this);
         } catch (final InvocationTargetException ex) {
             LCTX.e("Action " + name + " failed on execution: ", ex.getCause());
         } catch (final Throwable th) {
@@ -210,15 +216,15 @@ public class ActionEx implements Runnable, View.OnClickListener, View.OnLongClic
     }
 
     public boolean isDialogItemSelected(final int which) {
-        final Map<Integer, Boolean> map = this.getParameter(IActionController.DIALOG_SELECTED_ITEMS_PROPERTY);
-        return map != null ? map.get(which) == Boolean.TRUE : false;
+        final SparseBooleanArray map = this.getParameter(IActionController.DIALOG_SELECTED_ITEMS_PROPERTY);
+        return map != null ? map.get(which) : false;
     }
 
     @Override
     public void onClick(final DialogInterface dialog, final int which, final boolean isChecked) {
-        Map<Integer, Boolean> map = this.getParameter(IActionController.DIALOG_SELECTED_ITEMS_PROPERTY);
+        SparseBooleanArray map = this.getParameter(IActionController.DIALOG_SELECTED_ITEMS_PROPERTY);
         if (map == null) {
-            map = new HashMap<Integer, Boolean>();
+            map = new SparseBooleanArray();
             this.putValue(IActionController.DIALOG_SELECTED_ITEMS_PROPERTY, map);
         }
         map.put(which, isChecked);
@@ -252,10 +258,6 @@ public class ActionEx implements Runnable, View.OnClickListener, View.OnLongClic
         }
     }
 
-    private static Map<Integer, String> s_names;
-
-    private static Map<String, Integer> s_ids;
-
     public static String getActionName(final int id) {
         if (s_names == null) {
             fillMapping();
@@ -271,7 +273,7 @@ public class ActionEx implements Runnable, View.OnClickListener, View.OnLongClic
     }
 
     private static void fillMapping() {
-        s_names = new HashMap<Integer, String>();
+        s_names = new SparseArrayEx<String>();
         s_ids = new HashMap<String, Integer>();
 
         for (final Field f : R.id.class.getFields()) {

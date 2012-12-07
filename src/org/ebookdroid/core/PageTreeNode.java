@@ -1,30 +1,26 @@
 package org.ebookdroid.core;
 
 import org.ebookdroid.common.bitmaps.BitmapManager;
-import org.ebookdroid.common.bitmaps.BitmapRef;
-import org.ebookdroid.common.bitmaps.Bitmaps;
-import org.ebookdroid.common.bitmaps.RawBitmap;
-import org.ebookdroid.common.log.LogContext;
-import org.ebookdroid.common.settings.AppPreferences;
+import org.ebookdroid.common.bitmaps.ByteBufferBitmap;
+import org.ebookdroid.common.bitmaps.ByteBufferManager;
+import org.ebookdroid.common.bitmaps.GLBitmaps;
+import org.ebookdroid.common.cache.DocumentCacheFile.PageInfo;
 import org.ebookdroid.common.settings.AppSettings;
-import org.ebookdroid.common.settings.SettingsManager;
 import org.ebookdroid.common.settings.books.BookSettings;
 import org.ebookdroid.core.codec.CodecPage;
 import org.ebookdroid.core.models.DecodingProgressModel;
 import org.ebookdroid.ui.viewer.IViewController;
 
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.PointF;
-import android.graphics.Rect;
 import android.graphics.RectF;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.emdev.common.log.LogContext;
+import org.emdev.ui.gl.GLCanvas;
 import org.emdev.utils.MatrixUtils;
 
 public class PageTreeNode implements DecodeService.DecodeCallback {
@@ -41,10 +37,56 @@ public class PageTreeNode implements DecodeService.DecodeCallback {
     final AtomicBoolean decodingNow = new AtomicBoolean();
     final BitmapHolder holder = new BitmapHolder();
 
+    final RectF localPageSliceBounds;
     final RectF pageSliceBounds;
 
     float bitmapZoom = 1;
-    RectF croppedBounds = null;
+    private RectF autoCropping = null;
+    private RectF manualCropping = null;
+
+    public RectF getCropping() {
+        return manualCropping != null ? manualCropping : autoCropping;
+    }
+
+    public boolean hasManualCropping() {
+        return manualCropping != null;
+    }
+
+    public void setInitialCropping(final PageInfo pi) {
+        if (id != 0) {
+            return;
+        }
+
+        if (pi != null) {
+            autoCropping = pi.autoCropping != null ? new RectF(pi.autoCropping) : null;
+            manualCropping = pi.manualCropping != null ? new RectF(pi.manualCropping) : null;
+        } else {
+            autoCropping = null;
+            manualCropping = null;
+        }
+
+        page.updateAspectRatio();
+    }
+
+    public void setAutoCropping(final RectF r, final boolean commit) {
+        autoCropping = r;
+        if (id == 0) {
+            if (commit) {
+                page.base.getDocumentModel().updateAutoCropping(page, r);
+            }
+            page.updateAspectRatio();
+        }
+    }
+
+    public void setManualCropping(final RectF r, final boolean commit) {
+        manualCropping = r;
+        if (id == 0) {
+            if (commit) {
+                page.base.getDocumentModel().updateManualCropping(page, r);
+            }
+            page.updateAspectRatio();
+        }
+    }
 
     PageTreeNode(final Page page) {
         assert page != null;
@@ -55,8 +97,10 @@ public class PageTreeNode implements DecodeService.DecodeCallback {
         this.level = PageTreeLevel.ROOT;
         this.shortId = page.index.viewIndex + ":0";
         this.fullId = page.index + ":0";
-        this.pageSliceBounds = page.type.getInitialRect();
-        this.croppedBounds = null;
+        this.localPageSliceBounds = page.type.getInitialRect();
+        this.pageSliceBounds = localPageSliceBounds;
+        this.autoCropping = null;
+        this.manualCropping = null;
     }
 
     PageTreeNode(final Page page, final PageTreeNode parent, final int id, final RectF localPageSliceBounds) {
@@ -70,8 +114,10 @@ public class PageTreeNode implements DecodeService.DecodeCallback {
         this.level = parent.level.next;
         this.shortId = page.index.viewIndex + ":" + id;
         this.fullId = page.index + ":" + id;
+        this.localPageSliceBounds = localPageSliceBounds;
         this.pageSliceBounds = evaluatePageSliceBounds(localPageSliceBounds, parent);
-        this.croppedBounds = evaluateCroppedPageSliceBounds(localPageSliceBounds, parent);
+
+        evaluateCroppedPageSliceBounds();
     }
 
     @Override
@@ -79,7 +125,7 @@ public class PageTreeNode implements DecodeService.DecodeCallback {
         holder.recycle(null);
     }
 
-    public boolean recycle(final List<Bitmaps> bitmapsToRecycle) {
+    public boolean recycle(final List<GLBitmaps> bitmapsToRecycle) {
         stopDecodingThisNode("node recycling");
         return holder.recycle(bitmapsToRecycle);
     }
@@ -107,76 +153,46 @@ public class PageTreeNode implements DecodeService.DecodeCallback {
     }
 
     @Override
-    public void decodeComplete(final CodecPage codecPage, final BitmapRef bitmap, final Rect bitmapBounds,
-            final RectF croppedPageBounds) {
+    public void decodeComplete(final CodecPage codecPage, final ByteBufferBitmap bitmap, final RectF croppedPageBounds) {
 
         try {
-            if (bitmap == null || bitmapBounds == null) {
-                page.base.getActivity().runOnUiThread(new Runnable() {
-
-                    @Override
-                    public void run() {
-                        stopDecodingThisNode(null);
-                    }
-                });
+            if (bitmap == null) {
+                stopDecodingThisNode(null);
                 return;
             }
 
-            final BookSettings bs = SettingsManager.getBookSettings();
-            if (bs != null) {
-                final boolean correctContrast = bs.contrast != AppPreferences.CONTRAST.defValue;
-                final boolean correctExposure = bs.exposure != AppPreferences.EXPOSURE.defValue;
+            final AppSettings app = AppSettings.current();
+            final BookSettings bs = page.base.getBookSettings();
+            final boolean invert = bs != null ? bs.nightMode : app.nightMode;
 
-                if (correctContrast || correctExposure || bs.autoLevels) {
-                    final Bitmap origBitmap = bitmap.getBitmap();
-                    final RawBitmap bmp = new RawBitmap(origBitmap, bitmapBounds);
-                    if (correctContrast) {
-                        bmp.contrast(bs.contrast);
-                    }
-                    if (correctExposure) {
-                        bmp.exposure(bs.exposure - AppPreferences.EXPOSURE.defValue);
-                    }
-                    if (bs.autoLevels) {
-                        bmp.autoLevels();
-                    }
-                    bmp.toBitmap(origBitmap);
-                }
+            if (bs != null) {
+                bitmap.applyEffects(bs);
+            }
+            if (invert) {
+                bitmap.invert();
             }
 
-            final Bitmaps bitmaps = holder.reuse(fullId, bitmap, bitmapBounds);
+            final PagePaint paint = invert ? PagePaint.NIGHT : PagePaint.DAY;
+            final GLBitmaps bitmaps = new GLBitmaps(fullId, bitmap, paint);
 
-            final Runnable r = new Runnable() {
+            holder.setBitmap(bitmaps);
+            stopDecodingThisNode(null);
 
-                @Override
-                public void run() {
-                    // long t0 = System.currentTimeMillis();
-                    holder.setBitmap(bitmaps);
-                    stopDecodingThisNode(null);
+            final IViewController dc = page.base.getDocumentController();
+            if (dc instanceof AbstractViewController) {
+                EventPool.newEventChildLoaded((AbstractViewController) dc, PageTreeNode.this).process()
+                        .release();
+            }
 
-                    final IViewController dc = page.base.getDocumentController();
-                    if (dc instanceof AbstractViewController) {
-                        EventPool.newEventChildLoaded((AbstractViewController) dc, PageTreeNode.this, bitmapBounds)
-                                .process();
-                    }
-
-                    // System.out.println("decodeComplete(): " + (System.currentTimeMillis() - t0) + " ms");
-                }
-            };
-
-            page.base.getActivity().runOnUiThread(r);
         } catch (final OutOfMemoryError ex) {
             LCTX.e("No memory: ", ex);
             BitmapManager.clear("PageTreeNode OutOfMemoryError: ");
-            page.base.getActivity().runOnUiThread(new Runnable() {
-
-                @Override
-                public void run() {
-                    stopDecodingThisNode(null);
-                }
-            });
+            ByteBufferManager.clear("PageTreeNode OutOfMemoryError: ");
+            stopDecodingThisNode(null);
         } finally {
-            BitmapManager.release(bitmap);
+            ByteBufferManager.release(bitmap);
         }
+
     }
 
     public RectF getTargetRect(final RectF pageBounds) {
@@ -193,24 +209,30 @@ public class PageTreeNode implements DecodeService.DecodeCallback {
         return sliceBounds;
     }
 
-    public static RectF evaluateCroppedPageSliceBounds(final RectF localPageSliceBounds, final PageTreeNode parent) {
+    public void evaluateCroppedPageSliceBounds() {
         if (parent == null) {
+            return;
+        }
+
+        if (parent.getCropping() == null) {
+            parent.evaluateCroppedPageSliceBounds();
+        }
+
+        autoCropping = evaluateCroppedPageSliceBounds(parent.autoCropping, this.localPageSliceBounds);
+        manualCropping = evaluateCroppedPageSliceBounds(parent.manualCropping, this.localPageSliceBounds);
+    }
+
+    public static RectF evaluateCroppedPageSliceBounds(final RectF crop, final RectF slice) {
+        if (crop == null) {
             return null;
         }
-        if (parent.croppedBounds == null) {
-            parent.croppedBounds = evaluateCroppedPageSliceBounds(parent.pageSliceBounds, parent.parent);
-            if (parent.croppedBounds == null) {
-                return null;
-            }
-        }
 
+        final RectF sliceBounds = new RectF();
         final Matrix tmpMatrix = MatrixUtils.get();
 
-        tmpMatrix.postScale(parent.croppedBounds.width(), parent.croppedBounds.height());
-        tmpMatrix.postTranslate(parent.croppedBounds.left, parent.croppedBounds.top);
-        final RectF sliceBounds = new RectF();
-        tmpMatrix.mapRect(sliceBounds, localPageSliceBounds);
-
+        tmpMatrix.postScale(crop.width(), crop.height());
+        tmpMatrix.postTranslate(crop.left, crop.top);
+        tmpMatrix.mapRect(sliceBounds, slice);
         return sliceBounds;
     }
 
@@ -254,54 +276,39 @@ public class PageTreeNode implements DecodeService.DecodeCallback {
 
     class BitmapHolder {
 
-        final AtomicReference<Bitmaps> ref = new AtomicReference<Bitmaps>();
+        final AtomicReference<GLBitmaps> ref = new AtomicReference<GLBitmaps>();
 
-        public boolean drawBitmap(final Canvas canvas, final PagePaint paint, final PointF viewBase,
+        public boolean drawBitmap(final GLCanvas canvas, final PagePaint paint, final PointF viewBase,
                 final RectF targetRect, final RectF clipRect) {
-            final Bitmaps bitmaps = ref.get();
-            return bitmaps != null ? bitmaps.draw(canvas, paint, viewBase, targetRect, clipRect) : false;
-        }
-
-        public Bitmaps reuse(final String nodeId, final BitmapRef bitmap, final Rect bitmapBounds) {
-            final BookSettings bs = SettingsManager.getBookSettings();
-            final AppSettings app = SettingsManager.getAppSettings();
-            final boolean invert = bs != null ? bs.nightMode : app.nightMode;
-            if (SettingsManager.getAppSettings().textureReuseEnabled) {
-                final Bitmaps bitmaps = ref.get();
-                if (bitmaps != null) {
-                    if (bitmaps.reuse(nodeId, bitmap, bitmapBounds, invert)) {
-                        return bitmaps;
-                    }
-                }
-            }
-            return new Bitmaps(nodeId, bitmap, bitmapBounds, invert);
+            final GLBitmaps bitmaps = ref.get();
+            return bitmaps != null ? bitmaps.drawGL(canvas, paint, viewBase, targetRect, clipRect) : false;
         }
 
         public boolean hasBitmaps() {
-            final Bitmaps bitmaps = ref.get();
+            final GLBitmaps bitmaps = ref.get();
             return bitmaps != null ? bitmaps.hasBitmaps() : false;
         }
 
-        public boolean recycle(final List<Bitmaps> bitmapsToRecycle) {
-            final Bitmaps bitmaps = ref.getAndSet(null);
+        public boolean recycle(final List<GLBitmaps> bitmapsToRecycle) {
+            final GLBitmaps bitmaps = ref.getAndSet(null);
             if (bitmaps != null) {
                 if (bitmapsToRecycle != null) {
                     bitmapsToRecycle.add(bitmaps);
                 } else {
-                    BitmapManager.release(Arrays.asList(bitmaps));
+                    ByteBufferManager.release(bitmaps);
                 }
                 return true;
             }
             return false;
         }
 
-        public void setBitmap(final Bitmaps bitmaps) {
+        public void setBitmap(final GLBitmaps bitmaps) {
             if (bitmaps == null) {
                 return;
             }
-            final Bitmaps oldBitmaps = ref.getAndSet(bitmaps);
+            final GLBitmaps oldBitmaps = ref.getAndSet(bitmaps);
             if (oldBitmaps != null && oldBitmaps != bitmaps) {
-                BitmapManager.release(Arrays.asList(oldBitmaps));
+                ByteBufferManager.release(oldBitmaps);
             }
         }
     }

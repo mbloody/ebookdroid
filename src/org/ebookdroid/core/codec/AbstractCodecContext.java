@@ -1,6 +1,6 @@
 package org.ebookdroid.core.codec;
 
-import org.ebookdroid.common.settings.SettingsManager;
+import org.ebookdroid.common.settings.AppSettings;
 import org.ebookdroid.ui.viewer.ViewerActivity;
 
 import android.graphics.Bitmap;
@@ -14,13 +14,18 @@ public abstract class AbstractCodecContext implements CodecContext {
 
     private static Integer densityDPI;
 
+    final int supportedFeatures;
+
     private long contextHandle;
 
     /**
      * Constructor.
+     *
+     * @param supportedFeatures
+     *            supported features list
      */
-    protected AbstractCodecContext() {
-        this(SEQ.incrementAndGet());
+    protected AbstractCodecContext(final int supportedFeatures) {
+        this(SEQ.incrementAndGet(), supportedFeatures);
     }
 
     /**
@@ -29,8 +34,9 @@ public abstract class AbstractCodecContext implements CodecContext {
      * @param contextHandle
      *            contect handler
      */
-    protected AbstractCodecContext(final long contextHandle) {
+    protected AbstractCodecContext(final long contextHandle, final int supportedFeatures) {
         this.contextHandle = contextHandle;
+        this.supportedFeatures = supportedFeatures;
     }
 
     @Override
@@ -76,8 +82,8 @@ public abstract class AbstractCodecContext implements CodecContext {
     }
 
     @Override
-    public boolean isPageSizeCacheable() {
-        return true;
+    public boolean isFeatureSupported(final int feature) {
+        return (supportedFeatures & feature) != 0;
     }
 
     /**
@@ -87,15 +93,15 @@ public abstract class AbstractCodecContext implements CodecContext {
      */
     @Override
     public Bitmap.Config getBitmapConfig() {
-        return Bitmap.Config.RGB_565;
+        return Bitmap.Config.ARGB_8888;
     }
 
     public static int getWidthInPixels(final float pdfWidth) {
-        return getSizeInPixels(pdfWidth, SettingsManager.getAppSettings().getXDpi(ViewerActivity.DM.xdpi));
+        return getSizeInPixels(pdfWidth, AppSettings.current().getXDpi(ViewerActivity.DM.xdpi));
     }
 
     public static int getHeightInPixels(final float pdfHeight) {
-        return getSizeInPixels(pdfHeight, SettingsManager.getAppSettings().getYDpi(ViewerActivity.DM.ydpi));
+        return getSizeInPixels(pdfHeight, AppSettings.current().getYDpi(ViewerActivity.DM.ydpi));
     }
 
     public static int getSizeInPixels(final float pdfHeight, float dpi) {
@@ -112,7 +118,7 @@ public abstract class AbstractCodecContext implements CodecContext {
     private static int getDensityDPI() {
         if (densityDPI == null) {
             try {
-                Field f = ViewerActivity.DM.getClass().getDeclaredField("densityDpi");
+                final Field f = ViewerActivity.DM.getClass().getDeclaredField("densityDpi");
                 densityDPI = ((Integer) f.get(ViewerActivity.DM));
             } catch (final Throwable ex) {
                 densityDPI = Integer.valueOf(120);

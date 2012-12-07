@@ -1,5 +1,4 @@
-#include "fitz.h"
-#include "muxps.h"
+#include "muxps-internal.h"
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -47,7 +46,7 @@ xps_encode_font_char(fz_font *font, int code)
 {
 	FT_Face face = font->ft_face;
 	int gid = FT_Get_Char_Index(face, code);
-	if (gid == 0 && face->charmap->platform_id == 3 && face->charmap->encoding_id == 0)
+	if (gid == 0 && face->charmap && face->charmap->platform_id == 3 && face->charmap->encoding_id == 0)
 		gid = FT_Get_Char_Index(face, 0xF000 | code);
 	return gid;
 }
@@ -58,10 +57,13 @@ xps_measure_font_glyph(xps_document *doc, fz_font *font, int gid, xps_glyph_metr
 	int mask = FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING | FT_LOAD_IGNORE_TRANSFORM;
 	FT_Face face = font->ft_face;
 	FT_Fixed hadv, vadv;
+	fz_context *ctx = doc->ctx;
 
+	fz_lock(ctx, FZ_LOCK_FREETYPE);
 	FT_Set_Char_Size(face, 64, 64, 72, 72);
 	FT_Get_Advance(face, gid, mask, &hadv);
 	FT_Get_Advance(face, gid, mask | FT_LOAD_VERTICAL_LAYOUT, &vadv);
+	fz_unlock(ctx, FZ_LOCK_FREETYPE);
 
 	mtx->hadv = hadv / 65536.0f;
 	mtx->vadv = vadv / 65536.0f;
@@ -74,7 +76,7 @@ xps_lookup_font(xps_document *doc, char *name)
 	xps_font_cache *cache;
 	for (cache = doc->font_table; cache; cache = cache->next)
 		if (!xps_strcasecmp(cache->name, name))
-			return fz_keep_font(cache->font);
+			return fz_keep_font(doc->ctx, cache->font);
 	return NULL;
 }
 
@@ -83,7 +85,7 @@ xps_insert_font(xps_document *doc, char *name, fz_font *font)
 {
 	xps_font_cache *cache = fz_malloc_struct(doc->ctx, xps_font_cache);
 	cache->name = fz_strdup(doc->ctx, name);
-	cache->font = fz_keep_font(font);
+	cache->font = fz_keep_font(doc->ctx, font);
 	cache->next = doc->font_table;
 	doc->font_table = cache;
 }
@@ -304,7 +306,7 @@ xps_parse_glyphs_imp(xps_document *doc, fz_matrix ctm,
 		{
 			if (us && un > 0)
 			{
-				int t = chartorune(&char_code, us);
+				int t = fz_chartorune(&char_code, us);
 				us += t; un -= t;
 			}
 		}
@@ -329,6 +331,9 @@ xps_parse_glyphs_imp(xps_document *doc, fz_matrix ctm,
 				advance = -mtx.hadv * 100;
 			else
 				advance = mtx.hadv * 100;
+
+			if (font->ft_bold)
+				advance *= 1.02f;
 
 			if (is && *is)
 			{
@@ -387,6 +392,7 @@ xps_parse_glyphs(xps_document *doc, fz_matrix ctm,
 	char *clip_att;
 	char *opacity_att;
 	char *opacity_mask_att;
+	char *navigate_uri_att;
 
 	xml_element *transform_tag = NULL;
 	xml_element *clip_tag = NULL;
@@ -399,6 +405,7 @@ xps_parse_glyphs(xps_document *doc, fz_matrix ctm,
 	fz_font *font;
 
 	char partname[1024];
+	char fakename[1024];
 	char *subfont;
 
 	float font_size = 10;
@@ -428,6 +435,7 @@ xps_parse_glyphs(xps_document *doc, fz_matrix ctm,
 	clip_att = xml_att(root, "Clip");
 	opacity_att = xml_att(root, "Opacity");
 	opacity_mask_att = xml_att(root, "OpacityMask");
+	navigate_uri_att = xml_att(root, "FixedPage.NavigateUri");
 
 	for (node = xml_down(root); node; node = xml_next(node))
 	{
@@ -471,7 +479,7 @@ xps_parse_glyphs(xps_document *doc, fz_matrix ctm,
 	 * Find and load the font resource
 	 */
 
-	xps_absolute_path(partname, base_uri, font_uri_att, sizeof partname);
+	xps_resolve_url(partname, base_uri, font_uri_att, sizeof partname);
 	subfont = strrchr(partname, '#');
 	if (subfont)
 	{
@@ -479,7 +487,19 @@ xps_parse_glyphs(xps_document *doc, fz_matrix ctm,
 		*subfont = 0;
 	}
 
-	font = xps_lookup_font(doc, partname);
+	/* Make a new part name for font with style simulation applied */
+	fz_strlcpy(fakename, partname, sizeof fakename);
+	if (style_att)
+	{
+		if (!strcmp(style_att, "BoldSimulation"))
+			fz_strlcat(fakename, "#Bold", sizeof fakename);
+		else if (!strcmp(style_att, "ItalicSimulation"))
+			fz_strlcat(fakename, "#Italic", sizeof fakename);
+		else if (!strcmp(style_att, "BoldItalicSimulation"))
+			fz_strlcat(fakename, "#BoldItalic", sizeof fakename);
+	}
+
+	font = xps_lookup_font(doc, fakename);
 	if (!font)
 	{
 		fz_try(doc->ctx)
@@ -500,7 +520,7 @@ xps_parse_glyphs(xps_document *doc, fz_matrix ctm,
 
 		fz_try(doc->ctx)
 		{
-			font = fz_new_font_from_memory(doc->ctx, part->data, part->size, subfontid, 1);
+			font = fz_new_font_from_memory(doc->ctx, NULL, part->data, part->size, subfontid, 1);
 		}
 		fz_catch(doc->ctx)
 		{
@@ -509,9 +529,15 @@ xps_parse_glyphs(xps_document *doc, fz_matrix ctm,
 			return;
 		}
 
+		if (style_att)
+		{
+			font->ft_bold = !!strstr(style_att, "Bold");
+			font->ft_italic = !!strstr(style_att, "Italic");
+		}
+
 		xps_select_best_font_encoding(doc, font);
 
-		xps_insert_font(doc, part->name, font);
+		xps_insert_font(doc, fakename, font);
 
 		/* NOTE: we keep part->data in the font */
 		font->ft_data = part->data;
@@ -545,6 +571,9 @@ xps_parse_glyphs(xps_document *doc, fz_matrix ctm,
 
 	area = fz_bound_text(doc->ctx, text, ctm);
 
+	if (navigate_uri_att)
+		xps_add_link(doc, area, base_uri, navigate_uri_att);
+
 	xps_begin_opacity(doc, ctm, area, opacity_mask_uri, dict, opacity_att, opacity_mask_tag);
 
 	/* If it's a solid color brush fill/stroke do a simple fill */
@@ -563,7 +592,7 @@ xps_parse_glyphs(xps_document *doc, fz_matrix ctm,
 
 		xps_parse_color(doc, base_uri, fill_att, &colorspace, samples);
 		if (fill_opacity_att)
-			samples[0] = fz_atof(fill_opacity_att);
+			samples[0] *= fz_atof(fill_opacity_att);
 		xps_set_color(doc, colorspace, samples);
 
 		fz_fill_text(doc->dev, text, ctm,

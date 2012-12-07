@@ -1,8 +1,10 @@
 package org.ebookdroid.ui.viewer;
 
+import org.ebookdroid.common.settings.books.BookSettings;
 import org.ebookdroid.core.DecodeService;
 import org.ebookdroid.core.models.DecodingProgressModel;
 import org.ebookdroid.core.models.DocumentModel;
+import org.ebookdroid.core.models.SearchModel;
 import org.ebookdroid.core.models.ZoomModel;
 
 import android.app.Activity;
@@ -16,9 +18,13 @@ public interface IActivityController extends IActionController<ViewerActivity> {
 
     Activity getActivity();
 
+    BookSettings getBookSettings();
+
     DecodeService getDecodeService();
 
     DocumentModel getDocumentModel();
+
+    SearchModel getSearchModel();
 
     IView getView();
 
@@ -30,14 +36,8 @@ public interface IActivityController extends IActionController<ViewerActivity> {
 
     DecodingProgressModel getDecodingProgressModel();
 
-    IViewController switchDocumentController();
-
     void jumpToPage(int viewIndex, float offsetX, float offsetY, boolean addToHistory);
 
-    static interface IBookLoadTask {
-
-        void setProgressDialogMessage(int resourceID, Object... args);
-
-    }
+    void runOnUiThread(Runnable r);
 
 }

@@ -1,7 +1,7 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
-#define MAX4(a,b,c,d) MAX(MAX(a,b), MAX(c,d))
-#define MIN4(a,b,c,d) MIN(MIN(a,b), MIN(c,d))
+#define MAX4(a,b,c,d) fz_max(fz_max(a,b), fz_max(c,d))
+#define MIN4(a,b,c,d) fz_min(fz_min(a,b), fz_min(c,d))
 
 /* Matrices, points and affine transformations */
 
@@ -97,15 +97,20 @@ fz_translate(float tx, float ty)
 fz_matrix
 fz_invert_matrix(fz_matrix src)
 {
-	fz_matrix dst;
-	float rdet = 1 / (src.a * src.d - src.b * src.c);
-	dst.a = src.d * rdet;
-	dst.b = -src.b * rdet;
-	dst.c = -src.c * rdet;
-	dst.d = src.a * rdet;
-	dst.e = -src.e * dst.a - src.f * dst.c;
-	dst.f = -src.e * dst.b - src.f * dst.d;
-	return dst;
+	float det = src.a * src.d - src.b * src.c;
+	if (det < -FLT_EPSILON || det > FLT_EPSILON)
+	{
+		fz_matrix dst;
+		float rdet = 1 / det;
+		dst.a = src.d * rdet;
+		dst.b = -src.b * rdet;
+		dst.c = -src.c * rdet;
+		dst.d = src.a * rdet;
+		dst.e = -src.e * dst.a - src.f * dst.c;
+		dst.f = -src.e * dst.b - src.f * dst.d;
+		return dst;
+	}
+	return src;
 }
 
 int
@@ -165,15 +170,30 @@ const fz_bbox fz_infinite_bbox = { 1, 1, -1, -1 };
 const fz_bbox fz_empty_bbox = { 0, 0, 0, 0 };
 const fz_bbox fz_unit_bbox = { 0, 0, 1, 1 };
 
+#define SAFE_INT(f) ((f > INT_MAX) ? INT_MAX : ((f < INT_MIN) ? INT_MIN : (int)f))
+fz_bbox
+fz_bbox_covering_rect(fz_rect f)
+{
+	fz_bbox i;
+	f.x0 = floorf(f.x0);
+	f.y0 = floorf(f.y0);
+	f.x1 = ceilf(f.x1);
+	f.y1 = ceilf(f.y1);
+	i.x0 = SAFE_INT(f.x0);
+	i.y0 = SAFE_INT(f.y0);
+	i.x1 = SAFE_INT(f.x1);
+	i.y1 = SAFE_INT(f.y1);
+	return i;
+}
+
 fz_bbox
 fz_round_rect(fz_rect f)
 {
 	fz_bbox i;
-	f.x0 = floorf(f.x0 + FLT_EPSILON);
-	f.y0 = floorf(f.y0 + FLT_EPSILON);
-	f.x1 = ceilf(f.x1 - FLT_EPSILON);
-	f.y1 = ceilf(f.y1 - FLT_EPSILON);
-#define SAFE_INT(f) ((f > INT_MAX) ? INT_MAX : ((f < INT_MIN) ? INT_MIN : (int)f))
+	f.x0 = floorf(f.x0 + 0.001);
+	f.y0 = floorf(f.y0 + 0.001);
+	f.x1 = ceilf(f.x1 - 0.001);
+	f.y1 = ceilf(f.y1 - 0.001);
 	i.x0 = SAFE_INT(f.x0);
 	i.y0 = SAFE_INT(f.y0);
 	i.x1 = SAFE_INT(f.x1);
@@ -189,10 +209,10 @@ fz_intersect_rect(fz_rect a, fz_rect b)
 	if (fz_is_infinite_rect(b)) return a;
 	if (fz_is_empty_rect(a)) return fz_empty_rect;
 	if (fz_is_empty_rect(b)) return fz_empty_rect;
-	r.x0 = MAX(a.x0, b.x0);
-	r.y0 = MAX(a.y0, b.y0);
-	r.x1 = MIN(a.x1, b.x1);
-	r.y1 = MIN(a.y1, b.y1);
+	r.x0 = fz_max(a.x0, b.x0);
+	r.y0 = fz_max(a.y0, b.y0);
+	r.x1 = fz_min(a.x1, b.x1);
+	r.y1 = fz_min(a.y1, b.y1);
 	return (r.x1 < r.x0 || r.y1 < r.y0) ? fz_empty_rect : r;
 }
 
@@ -204,10 +224,10 @@ fz_union_rect(fz_rect a, fz_rect b)
 	if (fz_is_infinite_rect(b)) return b;
 	if (fz_is_empty_rect(a)) return b;
 	if (fz_is_empty_rect(b)) return a;
-	r.x0 = MIN(a.x0, b.x0);
-	r.y0 = MIN(a.y0, b.y0);
-	r.x1 = MAX(a.x1, b.x1);
-	r.y1 = MAX(a.y1, b.y1);
+	r.x0 = fz_min(a.x0, b.x0);
+	r.y0 = fz_min(a.y0, b.y0);
+	r.x1 = fz_max(a.x1, b.x1);
+	r.y1 = fz_max(a.y1, b.y1);
 	return r;
 }
 
@@ -219,10 +239,10 @@ fz_intersect_bbox(fz_bbox a, fz_bbox b)
 	if (fz_is_infinite_rect(b)) return a;
 	if (fz_is_empty_rect(a)) return fz_empty_bbox;
 	if (fz_is_empty_rect(b)) return fz_empty_bbox;
-	r.x0 = MAX(a.x0, b.x0);
-	r.y0 = MAX(a.y0, b.y0);
-	r.x1 = MIN(a.x1, b.x1);
-	r.y1 = MIN(a.y1, b.y1);
+	r.x0 = fz_maxi(a.x0, b.x0);
+	r.y0 = fz_maxi(a.y0, b.y0);
+	r.x1 = fz_mini(a.x1, b.x1);
+	r.y1 = fz_mini(a.y1, b.y1);
 	return (r.x1 < r.x0 || r.y1 < r.y0) ? fz_empty_bbox : r;
 }
 
@@ -234,10 +254,10 @@ fz_union_bbox(fz_bbox a, fz_bbox b)
 	if (fz_is_infinite_rect(b)) return b;
 	if (fz_is_empty_rect(a)) return b;
 	if (fz_is_empty_rect(b)) return a;
-	r.x0 = MIN(a.x0, b.x0);
-	r.y0 = MIN(a.y0, b.y0);
-	r.x1 = MAX(a.x1, b.x1);
-	r.y1 = MAX(a.y1, b.y1);
+	r.x0 = fz_mini(a.x0, b.x0);
+	r.y0 = fz_mini(a.y0, b.y0);
+	r.x1 = fz_maxi(a.x1, b.x1);
+	r.y1 = fz_maxi(a.y1, b.y1);
 	return r;
 }
 

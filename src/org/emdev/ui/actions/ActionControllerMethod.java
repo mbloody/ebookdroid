@@ -1,22 +1,21 @@
 package org.emdev.ui.actions;
 
-import org.ebookdroid.common.log.LogContext;
-
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
 import org.emdev.utils.LengthUtils;
-import org.emdev.utils.android.AndroidVersion;
+import org.emdev.utils.collections.SparseArrayEx;
 
 public class ActionControllerMethod {
 
-    private static final LogContext LCTX = LogContext.ROOT.lctx("Actions");
+    private static final LogContext LCTX = LogManager.root().lctx("Actions");
 
-    private static HashMap<Class<?>, Map<Integer, Method>> s_methods = new HashMap<Class<?>, Map<Integer, Method>>();
+    private static HashMap<Class<?>, SparseArrayEx<Method>> s_methods = new HashMap<Class<?>, SparseArrayEx<Method>>();
 
     private final IActionController<?> m_controller;
 
@@ -30,7 +29,7 @@ public class ActionControllerMethod {
 
     /**
      * Constructor
-     * 
+     *
      * @param controller
      *            action controller
      * @param actionId
@@ -43,7 +42,7 @@ public class ActionControllerMethod {
 
     /**
      * Invokes controller method for the given controller and action
-     * 
+     *
      * @param action
      *            action
      * @return execution result
@@ -68,7 +67,7 @@ public class ActionControllerMethod {
 
     /**
      * Returns reflection error info.
-     * 
+     *
      * @return {@link Throwable}
      */
     public Throwable getErrorInfo() {
@@ -108,18 +107,18 @@ public class ActionControllerMethod {
 
     /**
      * Gets the method.
-     * 
+     *
      * @param target
      *            a possible action target
      * @param actionId
      *            the action id
-     * 
+     *
      * @return the method
      */
     private static synchronized Method getMethod(final Object target, final int actionId) {
         Class<? extends Object> clazz = target.getClass();
 
-        Map<Integer, Method> methods = s_methods.get(clazz);
+        SparseArrayEx<Method> methods = s_methods.get(clazz);
         if (methods == null) {
             methods = getActionMethods(clazz);
             s_methods.put(clazz, methods);
@@ -129,38 +128,19 @@ public class ActionControllerMethod {
 
     /**
      * Gets the method.
-     * 
+     *
      * @param clazz
      *            an action target class
-     * 
+     *
      * @return the map of action methods method
      */
-    private static Map<Integer, Method> getActionMethods(final Class<?> clazz) {
-        final Map<Integer, Method> result = new HashMap<Integer, Method>();
-
-        if (AndroidVersion.VERSION < 8) {
-            getActionsMethodsFromClassAnnotation(clazz, result);
-        } else {
-            getActionMethodsFromMethodAnnotations(clazz, result);
-        }
+    private static SparseArrayEx<Method> getActionMethods(final Class<?> clazz) {
+        final SparseArrayEx<Method> result = new SparseArrayEx<Method>();
+        getActionMethodsFromMethodAnnotations(clazz, result);
         return result;
     }
 
-    private static void getActionsMethodsFromClassAnnotation(final Class<?> clazz, final Map<Integer, Method> result) {
-        if (clazz.isAnnotationPresent(ActionTarget.class)) {
-            ActionTarget a = clazz.getAnnotation(ActionTarget.class);
-            for(ActionMethodDef def : a.actions()) {
-                try {
-                    Method m = clazz.getMethod(def.method(), ActionEx.class);
-                    result.put(def.id(), m);
-                } catch (Exception ex) {
-                    LCTX.e("No action method found: " + clazz.getSimpleName() + "." + ex.getMessage());
-                }
-            }
-        }
-    }
-
-    private static void getActionMethodsFromMethodAnnotations(final Class<?> clazz, final Map<Integer, Method> result) {
+    private static void getActionMethodsFromMethodAnnotations(final Class<?> clazz, final SparseArrayEx<Method> result) {
         final Method[] methods = clazz.getMethods();
         for (final Method method : methods) {
             final int modifiers = method.getModifiers();

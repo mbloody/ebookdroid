@@ -1,10 +1,7 @@
 package org.ebookdroid.droids.cbx.codec;
 
-import org.ebookdroid.common.log.LogContext;
 import org.ebookdroid.core.codec.AbstractCodecDocument;
 import org.ebookdroid.core.codec.CodecPageInfo;
-
-import android.graphics.RectF;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -13,16 +10,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
+import org.emdev.common.archives.ArchiveEntry;
+import org.emdev.common.archives.ArchiveEntryExtensionFilter;
+import org.emdev.common.archives.ArchiveFile;
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
 import org.emdev.utils.StringUtils;
-import org.emdev.utils.archives.ArchiveEntry;
-import org.emdev.utils.archives.ArchiveFile;
-import org.emdev.utils.filesystem.FileExtensionFilter;
 
 public class CbxDocument<ArchiveEntryType extends ArchiveEntry> extends AbstractCodecDocument {
 
-    public static final LogContext LCTX = LogContext.ROOT.lctx("Cbx");
+    public static final LogContext LCTX = LogManager.root().lctx("Cbx", false);
 
-    private static final FileExtensionFilter imageFilter = new FileExtensionFilter("jpg", "jpeg", "png", "gif");
+    private static final ArchiveEntryExtensionFilter imageFilter = new ArchiveEntryExtensionFilter("jpg", "jpeg", "png", "gif");
 
     private final ArchiveFile<ArchiveEntryType> archive;
 
@@ -30,7 +29,7 @@ public class CbxDocument<ArchiveEntryType extends ArchiveEntry> extends Abstract
 
     /**
      * Constructor.
-     * 
+     *
      * @param fileName
      *            archive file name
      */
@@ -53,7 +52,7 @@ public class CbxDocument<ArchiveEntryType extends ArchiveEntry> extends Abstract
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.core.codec.CodecDocument#getPageCount()
      */
     @Override
@@ -63,7 +62,7 @@ public class CbxDocument<ArchiveEntryType extends ArchiveEntry> extends Abstract
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.core.codec.CodecDocument#getPage(int)
      */
     @Override
@@ -76,7 +75,7 @@ public class CbxDocument<ArchiveEntryType extends ArchiveEntry> extends Abstract
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.core.codec.CodecDocument#getPageInfo(int)
      */
     @Override
@@ -97,10 +96,4 @@ public class CbxDocument<ArchiveEntryType extends ArchiveEntry> extends Abstract
             }
         }
     }
-
-    @Override
-    public List<? extends RectF> searchText(final int pageNuber, final String pattern) throws DocSearchNotSupported {
-        return null;
-    }
-
 }

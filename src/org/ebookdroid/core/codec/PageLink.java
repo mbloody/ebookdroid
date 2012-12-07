@@ -34,7 +34,7 @@ public class PageLink {
         if (url != null) {
             buf.append(", ");
             buf.append("url").append("=").append(url);
-        } 
+        }
         if (targetPage != -1) {
             buf.append(", ");
             buf.append("target").append("=").append(targetPage);

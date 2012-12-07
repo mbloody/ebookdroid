@@ -5,9 +5,9 @@ import org.ebookdroid.droids.cbx.codec.CbxContext;
 import java.io.File;
 import java.io.IOException;
 
-import org.emdev.utils.archives.ArchiveFile;
-import org.emdev.utils.archives.rar.RarArchive;
-import org.emdev.utils.archives.rar.RarArchiveEntry;
+import org.emdev.common.archives.ArchiveFile;
+import org.emdev.common.archives.rar.RarArchive;
+import org.emdev.common.archives.rar.RarArchiveEntry;
 
 public class CbrContext extends CbxContext<RarArchiveEntry> {
 
@@ -22,7 +22,7 @@ public class CbrContext extends CbxContext<RarArchiveEntry> {
      */
     @Override
     public ArchiveFile<RarArchiveEntry> createArchive(final File file, final String password) throws IOException {
-        return new RarArchive(file);
+        return new RarArchive(file, false);
     }
 
 }

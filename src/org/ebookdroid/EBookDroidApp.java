@@ -1,100 +1,168 @@
 package org.ebookdroid;
 
 import org.ebookdroid.common.bitmaps.BitmapManager;
+import org.ebookdroid.common.bitmaps.ByteBufferManager;
 import org.ebookdroid.common.cache.CacheManager;
-import org.ebookdroid.common.log.EmergencyHandler;
-import org.ebookdroid.common.log.LogContext;
+import org.ebookdroid.common.settings.AppSettings;
+import org.ebookdroid.common.settings.BackupSettings;
+import org.ebookdroid.common.settings.LibSettings;
+import org.ebookdroid.common.settings.LibSettings.Diff;
 import org.ebookdroid.common.settings.SettingsManager;
+import org.ebookdroid.common.settings.listeners.IAppSettingsChangeListener;
+import org.ebookdroid.common.settings.listeners.IBackupSettingsChangeListener;
+import org.ebookdroid.common.settings.listeners.ILibSettingsChangeListener;
+import org.ebookdroid.ui.library.RecentActivityController;
 
-import android.app.Application;
 import android.content.Context;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
-import android.os.Build;
-import android.os.Environment;
+import android.util.Log;
+import android.webkit.WebView;
 
-import java.io.File;
+import org.emdev.BaseDroidApp;
+import org.emdev.common.backup.BackupManager;
+import org.emdev.common.filesystem.MediaManager;
+import org.emdev.common.fonts.FontManager;
+import org.emdev.ui.actions.ActionController;
+import org.emdev.ui.actions.ActionDialogBuilder;
+import org.emdev.ui.gl.GLConfiguration;
+import org.emdev.utils.concurrent.Flag;
 
-import org.emdev.utils.FileUtils;
-import org.emdev.utils.android.AndroidVersion;
+public class EBookDroidApp extends BaseDroidApp implements IAppSettingsChangeListener, IBackupSettingsChangeListener,
+        ILibSettingsChangeListener {
 
-public class EBookDroidApp extends Application {
+    public static final Flag initialized = new Flag();
 
-    public static final LogContext LCTX = LogContext.ROOT;
+    public static EBookDroidVersion version;
 
-    public static Context context;
-
-    public static String APP_VERSION;
-
-    public static String APP_PACKAGE;
-
-    public static File EXT_STORAGE;
+    private static EBookDroidApp instance;
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see android.app.Application#onCreate()
      */
     @Override
     public void onCreate() {
         super.onCreate();
 
-        this.init();
+        instance = this;
+        version = EBookDroidVersion.get(APP_VERSION_CODE);
 
-        EmergencyHandler.init(this);
-        LogContext.init(this);
         SettingsManager.init(this);
         CacheManager.init(this);
+        FontManager.init();
+        MediaManager.init(this);
+
+        preallocateHeap(AppSettings.current().heapPreallocate);
+
+        SettingsManager.addListener(this);
+        onAppSettingsChanged(null, AppSettings.current(), null);
+        onBackupSettingsChanged(null, BackupSettings.current(), null);
+
+        GLConfiguration.stencilRequired = !IS_EMULATOR;
+
+        initialized.set();
     }
 
-    protected void init() {
-        context = getApplicationContext();
-
-        final PackageManager pm = getPackageManager();
-        try {
-            final PackageInfo pi = pm.getPackageInfo(getPackageName(), 0);
-            APP_VERSION = pi.versionName;
-            APP_PACKAGE = pi.packageName;
-            EXT_STORAGE = Environment.getExternalStorageDirectory();
-
-            LCTX.i(getString(pi.applicationInfo.labelRes) + " (" + APP_PACKAGE + ")" + " v" + APP_VERSION + "("
-                    + pi.versionCode + ")");
-
-            LCTX.i("Root             dir: " + Environment.getRootDirectory());
-            LCTX.i("Data             dir: " + Environment.getDataDirectory());
-            LCTX.i("External storage dir: " + Environment.getExternalStorageDirectory());
-            LCTX.i("Files            dir: " + FileUtils.getAbsolutePath(getFilesDir()));
-            LCTX.i("Cache            dir: " + FileUtils.getAbsolutePath(getCacheDir()));
-            // LCTX.i("External cache   dir: " + getExternalCacheDir().getAbsolutePath());
-
-            LCTX.i("VERSION     : " + AndroidVersion.VERSION);
-            LCTX.i("BOARD       : " + Build.BOARD);
-            LCTX.i("BRAND       : " + Build.BRAND);
-            // LCTX.i("CPU_ABI     : " + Build.CPU_ABI);
-            // LCTX.i("CPU_ABI2    : " + Build.CPU_ABI2);
-            LCTX.i("DEVICE      : " + Build.DEVICE);
-            LCTX.i("DISPLAY     : " + Build.DISPLAY);
-            LCTX.i("FINGERPRINT : " + Build.FINGERPRINT);
-            // LCTX.i("HARDWARE    : " + Build.HARDWARE);
-            LCTX.i("ID          : " + Build.ID);
-            // LCTX.i("MANUFACTURER: " + Build.MANUFACTURER);
-            LCTX.i("MODEL       : " + Build.MODEL);
-            LCTX.i("PRODUCT     : " + Build.PRODUCT);
-
-        } catch (final NameNotFoundException e) {
-            e.printStackTrace();
-        }
+    @Override
+    public void onTerminate() {
+        SettingsManager.onTerminate();
+        MediaManager.onTerminate(this);
     }
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see android.app.Application#onLowMemory()
      */
     @Override
     public void onLowMemory() {
         super.onLowMemory();
         BitmapManager.clear("on Low Memory: ");
+        ByteBufferManager.clear("on Low Memory: ");
     }
+
+    @Override
+    public void onAppSettingsChanged(final AppSettings oldSettings, final AppSettings newSettings,
+            final AppSettings.Diff diff) {
+
+        BitmapManager.setPartSize(1 << newSettings.bitmapSize);
+
+        setAppLocale(newSettings.lang);
+    }
+
+    @Override
+    public void onBackupSettingsChanged(final BackupSettings oldSettings, final BackupSettings newSettings,
+            final BackupSettings.Diff diff) {
+        BackupManager.setMaxNumberOfAutoBackups(newSettings.maxNumberOfAutoBackups);
+    }
+
+    @Override
+    public void onLibSettingsChanged(final LibSettings oldSettings, final LibSettings newSettings, final Diff diff) {
+        if (diff.isCacheLocationChanged()) {
+            CacheManager.setCacheLocation(newSettings.cacheLocation, !diff.isFirstTime());
+        }
+    }
+
+    public static void checkInstalledFonts(final Context context) {
+        if (!FontManager.external.hasInstalled()) {
+            if (!SettingsManager.isInitialFlagsSet(SettingsManager.INITIAL_FONTS)) {
+                SettingsManager.setInitialFlags(SettingsManager.INITIAL_FONTS);
+
+                final ActionDialogBuilder b = new ActionDialogBuilder(context, new ActionController<Context>(context));
+                final WebView view = new WebView(context);
+
+                final String text = context.getResources().getString(R.string.font_reminder);
+                final String content = "<html><body>" + text + "</body></html>";
+
+                view.loadDataWithBaseURL("file:///fake/not_used", content, "text/html", "UTF-8", "");
+
+                b.setTitle(R.string.font_reminder_title);
+                b.setView(view);
+                b.setPositiveButton(android.R.string.ok, R.id.actions_no_action);
+                b.show();
+            }
+        }
+    }
+
+    public static void onActivityClose(final boolean finishing) {
+        if (finishing && !SettingsManager.hasOpenedBooks() && !RecentActivityController.working.get()) {
+            if (instance != null) {
+                instance.onTerminate();
+            }
+            Log.i(APP_NAME, "Application finished");
+            System.exit(0);
+        }
+    }
+
+    /**
+     * Preallocate heap.
+     *
+     * @param size
+     *            the size in megabytes
+     * @return the object
+     */
+    private static Object preallocateHeap(int size) {
+        if (size <= 0) {
+            Log.i(APP_NAME, "No heap preallocation");
+            return null;
+        }
+        int i = size;
+        Log.i(APP_NAME, "Trying to preallocate " + size + "Mb");
+        while (i > 0) {
+            try {
+                byte[] tmp = new byte[i * 1024 * 1024];
+                tmp[(int) (size - 1)] = (byte) size;
+                Log.i(APP_NAME, "Preallocated " + i + "Mb");
+                tmp = null;
+                return tmp;
+            } catch (OutOfMemoryError e) {
+                i--;
+            } catch (IllegalArgumentException e) {
+                i--;
+            }
+        }
+        Log.i(APP_NAME, "Heap preallocation failed");
+        return null;
+    }
+
 }

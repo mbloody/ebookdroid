@@ -49,6 +49,8 @@ class DBAdapterV1 implements IDBAdapter {
 
     public static final String DB_BOOK_CLEAR_RECENT = "UPDATE book_settings set last_updated = 0";
 
+    public static final String DB_BOOK_REMOVE_BOOK_FROM_RECENT = "UPDATE book_settings set last_updated = 0 WHERE book=?";
+
     public static final String DB_BOOK_DROP = "DROP TABLE IF EXISTS book_settings";
 
     protected final DBSettingsManager manager;
@@ -68,7 +70,12 @@ class DBAdapterV1 implements IDBAdapter {
     }
 
     @Override
-    public Map<String, BookSettings> getBookSettings(final boolean all) {
+    public Map<String, BookSettings> getAllBooks() {
+        return getRecentBooks(true);
+    }
+
+    @Override
+    public Map<String, BookSettings> getRecentBooks(final boolean all) {
         return getBookSettings(DB_BOOK_GET_ALL, all);
     }
 
@@ -135,11 +142,19 @@ class DBAdapterV1 implements IDBAdapter {
     }
 
     @Override
-    public boolean storeBookSettings(final BookSettings bs) {
+    public final boolean storeBookSettings(final BookSettings bs) {
         try {
             final SQLiteDatabase db = manager.getWritableDatabase();
             try {
                 db.beginTransaction();
+
+                if (bs.lastChanged > 0) {
+                    bs.lastUpdated = System.currentTimeMillis();
+                }
+
+                if (LCTX.isDebugEnabled()) {
+                    LCTX.d("Store: " + bs.toJSON());
+                }
 
                 storeBookSettings(bs, db);
 
@@ -156,7 +171,37 @@ class DBAdapterV1 implements IDBAdapter {
     }
 
     @Override
-    public boolean storeBookSettings(final Collection<BookSettings> c) {
+    public boolean storeBookSettings(final List<BookSettings> list) {
+        try {
+            final SQLiteDatabase db = manager.getWritableDatabase();
+            try {
+                db.beginTransaction();
+
+                for (final BookSettings bs : list) {
+                    if (bs.lastChanged > 0) {
+                        bs.lastUpdated = System.currentTimeMillis();
+                    }
+
+                    if (LCTX.isDebugEnabled()) {
+                        LCTX.d("Store: " + bs.toJSON());
+                    }
+
+                    storeBookSettings(bs, db);
+                }
+                db.setTransactionSuccessful();
+
+                return true;
+            } finally {
+                endTransaction(db);
+            }
+        } catch (final Throwable th) {
+            LCTX.e("Update book settings failed: ", th);
+        }
+        return false;
+    }
+
+    @Override
+    public final boolean restoreBookSettings(final Collection<BookSettings> c) {
         try {
             final SQLiteDatabase db = manager.getWritableDatabase();
             try {
@@ -231,6 +276,27 @@ class DBAdapterV1 implements IDBAdapter {
     }
 
     @Override
+    public boolean removeBookFromRecents(final BookSettings bs) {
+        try {
+            final SQLiteDatabase db = manager.getWritableDatabase();
+            try {
+                db.beginTransaction();
+
+                db.execSQL(DB_BOOK_REMOVE_BOOK_FROM_RECENT, new Object[] { bs.fileName });
+
+                db.setTransactionSuccessful();
+
+                return true;
+            } finally {
+                endTransaction(db);
+            }
+        } catch (final Throwable th) {
+            LCTX.e("Removing book from recents failed: ", th);
+        }
+        return false;
+    }
+
+    @Override
     public void delete(final BookSettings current) {
         try {
             final SQLiteDatabase db = manager.getWritableDatabase();
@@ -272,8 +338,6 @@ class DBAdapterV1 implements IDBAdapter {
     }
 
     protected void storeBookSettings(final BookSettings bs, final SQLiteDatabase db) {
-        bs.lastUpdated = System.currentTimeMillis();
-
         final Object[] args = new Object[] {
                 // File name
                 bs.fileName,

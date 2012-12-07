@@ -1,11 +1,15 @@
 package org.emdev.ui.actions;
 
 import org.ebookdroid.R;
-import org.ebookdroid.common.log.LogContext;
+
+import android.view.View;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
 
 /**
  * This class defines base features for action controller.
@@ -13,10 +17,9 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * @param <ManagedComponent>
  *            manager GUI component class
  */
-@ActionTarget(actions = { @ActionMethodDef(id = R.id.actions_no_action, method = "noAction") })
 public abstract class AbstractComponentController<ManagedComponent> implements IActionController<ManagedComponent> {
 
-    protected static final LogContext LCTX = LogContext.ROOT.lctx("Actions");
+    protected static final LogContext LCTX = LogManager.root().lctx("Actions");
 
     protected final Map<Integer, ActionEx> m_actions = new LinkedHashMap<Integer, ActionEx>();
 
@@ -28,7 +31,7 @@ public abstract class AbstractComponentController<ManagedComponent> implements I
 
     /**
      * Constructor
-     * 
+     *
      * @param managedComponent
      *            managed component
      */
@@ -38,7 +41,7 @@ public abstract class AbstractComponentController<ManagedComponent> implements I
 
     /**
      * Constructor.
-     * 
+     *
      * @param parent
      *            the parent controller
      * @param managedComponent
@@ -69,7 +72,7 @@ public abstract class AbstractComponentController<ManagedComponent> implements I
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.emdev.ui.actions.IActionController#setManagedComponent(java.lang.Object)
      */
     @Override
@@ -87,7 +90,7 @@ public abstract class AbstractComponentController<ManagedComponent> implements I
 
     /**
      * Searches for an action by the given id
-     * 
+     *
      * @param id
      *            action id
      * @return an instance of {@link ActionEx} object or <code>null</code>
@@ -115,7 +118,7 @@ public abstract class AbstractComponentController<ManagedComponent> implements I
 
     /**
      * Creates and register a global action
-     * 
+     *
      * @param id
      *            action id
      * @return an instance of {@link ActionEx} object
@@ -139,7 +142,7 @@ public abstract class AbstractComponentController<ManagedComponent> implements I
 
     /**
      * Creates an action
-     * 
+     *
      * @param id
      *            action id
      * @param parameters
@@ -151,7 +154,7 @@ public abstract class AbstractComponentController<ManagedComponent> implements I
     public ActionEx createAction(final int id, final IActionParameter... parameters) {
         final ActionEx result = new ActionEx(this, id);
 
-        result.putValue(MANAGED_COMPONENT_PROPERTY, getManagedComponent());
+        result.putValue(MANAGED_COMPONENT_PROPERTY, m_managedComponent);
         result.putValue(COMPONENT_CONTROLLER_PROPERTY, this);
 
         for (final IActionParameter actionParameter : parameters) {
@@ -171,4 +174,11 @@ public abstract class AbstractComponentController<ManagedComponent> implements I
     @ActionMethod(ids = R.id.actions_no_action)
     public void noAction(final ActionEx action) {
     }
+
+    public final ActionEx setActionForView(final View view) {
+        final ActionEx action = getOrCreateAction(view.getId());
+        view.setOnClickListener(action);
+        return action;
+    }
+
 }

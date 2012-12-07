@@ -8,7 +8,6 @@ import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.view.View;
-import android.widget.Scroller;
 
 public class ViewStub implements IView {
 
@@ -22,11 +21,6 @@ public class ViewStub implements IView {
     @Override
     public IActivityController getBase() {
         return ActivityControllerStub.STUB;
-    }
-
-    @Override
-    public Scroller getScroller() {
-        return null;
     }
 
     @Override
@@ -59,6 +53,14 @@ public class ViewStub implements IView {
 
     @Override
     public void scrollTo(final int x, final int y) {
+    }
+
+    @Override
+    public void _scrollTo(int x, int y) {
+    }
+
+    @Override
+    public void onScrollChanged(int curX, int curY, int oldX, int oldY) {
     }
 
     @Override
@@ -125,4 +127,17 @@ public class ViewStub implements IView {
         return new PointF(0, 0);
     }
 
+    @Override
+    public void checkFullScreenMode() {
+    }
+
+    @Override
+    public boolean post(final Runnable r) {
+        return false;
+    }
+
+    @Override
+    public boolean isScrollFinished() {
+        return true;
+    }
 }

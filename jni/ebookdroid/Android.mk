@@ -2,22 +2,24 @@ LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
 
-
 LOCAL_MODULE    := ebookdroid
-ifneq ($(TARGET_ARCH_ABI),x86)
-ifneq ($(TARGET_ARCH_ABI),mips)
+
+ifeq ($(TARGET_ARCH_ABI),armeabi)
     LOCAL_ARM_MODE := arm
-endif # TARGET_ARCH_ABI != mips
-endif # TARGET_ARCH_ABI != x86
+endif # TARGET_ARCH_ABI == armeabi
+
 
 LOCAL_CFLAGS := 
 
 LOCAL_SRC_FILES := \
 	ebookdroidjni.c \
-	pdfdroidbridge.c \
-	xpsdroidbridge.c \
 	DjvuDroidBridge.cpp \
-	cbdroidbridge.c \
+	fb2droid.cpp \
+	bytebufferbitmapbridge.c \
+	mupdfdroidbridge.c \
+	jni_concurrent.c \
+	PageCropper.c \
+	javahelpers.c
 
 LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/../mupdf/mupdf/fitz \

@@ -2,25 +2,25 @@ package org.ebookdroid.core;
 
 import org.ebookdroid.R;
 import org.ebookdroid.common.keysbinding.KeyBindingsManager;
-import org.ebookdroid.common.log.LogContext;
+import org.ebookdroid.common.settings.AppSettings;
 import org.ebookdroid.common.settings.SettingsManager;
 import org.ebookdroid.common.settings.books.BookSettings;
 import org.ebookdroid.common.settings.types.DocumentViewMode;
 import org.ebookdroid.common.settings.types.PageAlign;
-import org.ebookdroid.common.settings.types.PageType;
 import org.ebookdroid.common.touch.DefaultGestureDetector;
 import org.ebookdroid.common.touch.IGestureDetector;
 import org.ebookdroid.common.touch.IMultiTouchListener;
-import org.ebookdroid.common.touch.MultiTouchGestureDetectorFactory;
+import org.ebookdroid.common.touch.MultiTouchGestureDetector;
 import org.ebookdroid.common.touch.TouchManager;
 import org.ebookdroid.common.touch.TouchManager.Touch;
 import org.ebookdroid.core.codec.PageLink;
 import org.ebookdroid.core.models.DocumentModel;
+import org.ebookdroid.core.models.DocumentModel.PageIterator;
 import org.ebookdroid.ui.viewer.IActivityController;
-import org.ebookdroid.ui.viewer.IActivityController.IBookLoadTask;
 import org.ebookdroid.ui.viewer.IView;
 import org.ebookdroid.ui.viewer.IViewController;
 
+import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.util.FloatMath;
@@ -32,27 +32,22 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
 import org.emdev.ui.actions.AbstractComponentController;
 import org.emdev.ui.actions.ActionEx;
 import org.emdev.ui.actions.ActionMethod;
-import org.emdev.ui.actions.ActionMethodDef;
-import org.emdev.ui.actions.ActionTarget;
 import org.emdev.ui.actions.params.Constant;
+import org.emdev.ui.progress.IProgressIndicator;
 import org.emdev.utils.LengthUtils;
 
-@ActionTarget(
-// action list
-actions = {
-        // actions
-        @ActionMethodDef(id = R.id.actions_verticalConfigScrollUp, method = "verticalConfigScroll"),
-        @ActionMethodDef(id = R.id.actions_verticalConfigScrollDown, method = "verticalConfigScroll")
-// no more
-})
 public abstract class AbstractViewController extends AbstractComponentController<IView> implements IViewController {
 
-    protected static final LogContext LCTX = LogContext.ROOT.lctx("View", false);
+    protected static final LogContext LCTX = LogManager.root().lctx("View", false);
 
     public static final int DOUBLE_TAP_TIME = 500;
+
+    private static final Float FZERO = Float.valueOf(0);
 
     public final IActivityController base;
 
@@ -65,6 +60,10 @@ public abstract class AbstractViewController extends AbstractComponentController
     protected boolean isShown = false;
 
     protected final AtomicBoolean inZoom = new AtomicBoolean();
+
+    protected final AtomicBoolean inQuickZoom = new AtomicBoolean();
+
+    protected final AtomicBoolean inZoomToColumn = new AtomicBoolean();
 
     protected final PageIndex pageToGo;
 
@@ -86,10 +85,14 @@ public abstract class AbstractViewController extends AbstractComponentController
         this.firstVisiblePage = -1;
         this.lastVisiblePage = -1;
 
-        this.pageToGo = SettingsManager.getBookSettings().getCurrentPage();
+        this.pageToGo = base.getBookSettings().getCurrentPage();
 
         createAction(R.id.actions_verticalConfigScrollUp, new Constant("direction", -1));
         createAction(R.id.actions_verticalConfigScrollDown, new Constant("direction", +1));
+        createAction(R.id.actions_leftTopCorner, new Constant("offsetX", 0), new Constant("offsetY", 0));
+        createAction(R.id.actions_leftBottomCorner, new Constant("offsetX", 0), new Constant("offsetY", 1));
+        createAction(R.id.actions_rightTopCorner, new Constant("offsetX", 1), new Constant("offsetY", 0));
+        createAction(R.id.actions_rightBottomCorner, new Constant("offsetX", 1), new Constant("offsetY", 1));
     }
 
     protected List<IGestureDetector> getGestureDetectors() {
@@ -101,14 +104,14 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     protected List<IGestureDetector> initGestureDetectors(final List<IGestureDetector> list) {
         final GestureListener listener = new GestureListener();
-        list.add(MultiTouchGestureDetectorFactory.create(listener));
+        list.add(new MultiTouchGestureDetector(listener));
         list.add(new DefaultGestureDetector(base.getContext(), listener));
         return list;
     }
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#getView()
      */
     @Override
@@ -118,7 +121,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#getBase()
      */
     @Override
@@ -128,11 +131,11 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#init(org.ebookdroid.ui.viewer.IActivityController.IBookLoadTask)
      */
     @Override
-    public final void init(final IBookLoadTask task) {
+    public final void init(final IProgressIndicator task) {
         if (!isInitialized) {
             try {
                 model.initPages(base, task);
@@ -143,7 +146,7 @@ public abstract class AbstractViewController extends AbstractComponentController
     }
 
     /**
-     * 
+     *
      */
     @Override
     public final void onDestroy() {
@@ -152,7 +155,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#show()
      */
     @Override
@@ -171,7 +174,9 @@ public abstract class AbstractViewController extends AbstractComponentController
 
             invalidatePageSizes(InvalidateSizeReason.INIT, null);
 
-            final BookSettings bs = SettingsManager.getBookSettings();
+            final BookSettings bs = base.getBookSettings();
+            bs.lastChanged = System.currentTimeMillis();
+
             final Page page = pageToGo.getActualPage(model, bs);
             final int toPage = page != null ? page.index.viewIndex : 0;
 
@@ -184,18 +189,13 @@ public abstract class AbstractViewController extends AbstractComponentController
     }
 
     protected final void updatePosition(final Page page, final ViewState viewState) {
-        final int left = getScrollX();
-        final int top = getScrollY();
-
-        final RectF cpBounds = viewState.getBounds(page);
-        final float offsetX = (left - cpBounds.left) / cpBounds.width();
-        final float offsetY = (top - cpBounds.top) / cpBounds.height();
-        SettingsManager.positionChanged(offsetX, offsetY);
+        final PointF pos = viewState.getPositionOnPage(page);
+        SettingsManager.positionChanged(base.getBookSettings(), pos.x, pos.y);
     }
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.core.events.ZoomListener#zoomChanged(float, float, boolean)
      */
     @Override
@@ -205,22 +205,134 @@ public abstract class AbstractViewController extends AbstractComponentController
         }
 
         inZoom.set(!committed);
-
-        EventPool.newEventZoom(this, oldZoom, newZoom, committed).process();
+        EventPool.newEventZoom(this, oldZoom, newZoom, committed).process().release();
 
         if (committed) {
             base.getManagedComponent().zoomChanged(newZoom);
+        } else {
+            inQuickZoom.set(false);
+            inZoomToColumn.set(false);
         }
+    }
+
+    @ActionMethod(ids = R.id.actions_quickZoom)
+    public final void quickZoom(final ActionEx action) {
+        if (inZoom.get()) {
+            return;
+        }
+        float zoomFactor = 2.0f;
+        if (inQuickZoom.compareAndSet(true, false)) {
+            zoomFactor = 1.0f / zoomFactor;
+        } else {
+            inQuickZoom.set(true);
+            inZoomToColumn.set(false);
+        }
+        base.getZoomModel().scaleAndCommitZoom(zoomFactor);
+    }
+
+    @ActionMethod(ids = R.id.actions_zoomToColumn)
+    public final void zoomToColumn(final ActionEx action) {
+        if (inZoom.get()) {
+            return;
+        }
+
+        final int tapX = action.getParameter("tap_x", FZERO).intValue();
+        final int tapY = action.getParameter("tap_y", FZERO).intValue();
+        if (tapX == 0 && tapY == 0) {
+            return;
+        }
+
+        // System.out.println("AbstractViewController.zoomToColumn(" + tapX + "," + tapY + ")");
+        PointF pos = null;
+        Page page = null;
+
+        final ViewState vs = ViewState.get(this);
+        try {
+            final PageIterator pages = model.getPages(firstVisiblePage, lastVisiblePage + 1);
+            try {
+                for (final Page p : pages) {
+                    pos = vs.getPositionOnPage(p, tapX, tapY);
+                    if ((0 <= pos.x && pos.x <= 1) && (0 <= pos.y && pos.y <= 1)) {
+                        page = p;
+                        break;
+                    }
+                }
+            } finally {
+                pages.release();
+            }
+            if (page == null) {
+                return;
+            }
+
+            final IView view = base.getView();
+            if (inZoomToColumn.compareAndSet(true, false)) {
+                base.getZoomModel().setZoom(1.0f, true);
+                final float offsetX = 0;
+                final float offsetY = pos.y - 0.5f * (view.getHeight() / page.getBounds(1.0f).height());
+                goToPage(page.index.viewIndex, offsetX, offsetY);
+                return;
+            }
+
+            final RectF column = page.getColumn(pos);
+            // System.out.println("AbstractViewController.zoomToColumn(): column = " + column);
+
+            if (column == null || column.width() > 0.95f) {
+                return;
+            }
+
+            inZoomToColumn.set(true);
+            inQuickZoom.set(false);
+
+            final int screenWidth = view.getWidth();
+            final int screenHeight = view.getHeight();
+
+            final RectF pb = vs.getBounds(page);
+
+            final float columnScreenWidth = page.getPageRegion(pb, new RectF(column)).width();
+
+            final float newZoom = screenWidth / columnScreenWidth;
+
+            base.getZoomModel().setZoom(newZoom, true);
+
+            scrollToColumn(page, column, pos, screenHeight);
+        } finally {
+            vs.release();
+        }
+    }
+
+    protected void scrollToColumn(final Page page, final RectF column, final PointF pos, final int screenHeight) {
+        final ViewState vs = ViewState.get(AbstractViewController.this);
+        final RectF pb = vs.getBounds(page);
+        final RectF columnRegion = page.getPageRegion(pb, new RectF(column));
+        columnRegion.offset(-vs.viewBase.x, -vs.viewBase.y);
+
+        final float toX = columnRegion.left;
+        final float toY = pb.top + pos.y * pb.height() - 0.5f * screenHeight;
+        getView().scrollTo((int) toX, (int) toY);
+
+        vs.release();
+    }
+
+    @ActionMethod(ids = { R.id.actions_leftTopCorner, R.id.actions_leftBottomCorner, R.id.actions_rightTopCorner,
+            R.id.actions_rightBottomCorner })
+    public void scrollToCorner(final ActionEx action) {
+        final Integer offX = action.getParameter("offsetX");
+        final Integer offY = action.getParameter("offsetY");
+
+        final float offsetX = offX != null ? offX.floatValue() : 0;
+        final float offsetY = offY != null ? offY.floatValue() : 0;
+
+        new EventGotoPageCorner(this, offsetX, offsetY).process().release();
     }
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#updateMemorySettings()
      */
     @Override
     public final void updateMemorySettings() {
-        EventPool.newEventReset(this, null, false).process();
+        EventPool.newEventReset(this, null, false).process().release();
     }
 
     public final int getScrollX() {
@@ -241,7 +353,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#dispatchKeyEvent(android.view.KeyEvent)
      */
     @Override
@@ -272,20 +384,11 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#onTouchEvent(android.view.MotionEvent)
      */
     @Override
     public final boolean onTouchEvent(final MotionEvent ev) {
-        final int delay = SettingsManager.getAppSettings().touchProcessingDelay;
-        if (delay > 0) {
-            try {
-                Thread.sleep(Math.min(250, delay));
-            } catch (final InterruptedException e) {
-                Thread.interrupted();
-            }
-        }
-
         for (final IGestureDetector d : getGestureDetectors()) {
             if (d.enabled() && d.onTouchEvent(ev)) {
                 return true;
@@ -296,7 +399,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#onLayoutChanged(boolean, boolean, android.graphics.Rect,
      *      android.graphics.Rect)
      */
@@ -308,7 +411,7 @@ public abstract class AbstractViewController extends AbstractComponentController
         }
         if (layoutChanged && !layoutLocked) {
             if (isShown) {
-                EventPool.newEventReset(this, InvalidateSizeReason.LAYOUT, true).process();
+                EventPool.newEventReset(this, InvalidateSizeReason.LAYOUT, true).process().release();
                 return true;
             } else {
                 if (LCTX.isDebugEnabled()) {
@@ -321,17 +424,17 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#toggleRenderingEffects()
      */
     @Override
     public final void toggleRenderingEffects() {
-        EventPool.newEventReset(this, null, true).process();
+        EventPool.newEventReset(this, null, true).process().release();
     }
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#invalidateScroll()
      */
     @Override
@@ -344,18 +447,18 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     /**
      * Sets the page align flag.
-     * 
+     *
      * @param align
      *            the new flag indicating align
      */
     @Override
     public final void setAlign(final PageAlign align) {
-        EventPool.newEventReset(this, InvalidateSizeReason.PAGE_ALIGN, false).process();
+        EventPool.newEventReset(this, InvalidateSizeReason.PAGE_ALIGN, false).process().release();
     }
 
     /**
      * Checks if view is initialized.
-     * 
+     *
      * @return true, if is initialized
      */
     protected final boolean isShown() {
@@ -364,7 +467,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#getFirstVisiblePage()
      */
     @Override
@@ -374,7 +477,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#getLastVisiblePage()
      */
     @Override
@@ -384,17 +487,17 @@ public abstract class AbstractViewController extends AbstractComponentController
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#redrawView()
      */
     @Override
     public final void redrawView() {
-        getView().redrawView(new ViewState(this));
+        getView().redrawView(ViewState.get(this));
     }
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @see org.ebookdroid.ui.viewer.IViewController#redrawView(org.ebookdroid.core.ViewState)
      */
     @Override
@@ -428,6 +531,8 @@ public abstract class AbstractViewController extends AbstractComponentController
             if (LCTX.isDebugEnabled()) {
                 LCTX.d("Touch action: " + action.name + ", " + action.getMethod().toString());
             }
+            action.addParameter(new Constant("tap_x", Float.valueOf(x))).addParameter(
+                    new Constant("tap_y", Float.valueOf(y)));
             action.run();
             return true;
         } else {
@@ -443,18 +548,24 @@ public abstract class AbstractViewController extends AbstractComponentController
         final RectF rect = new RectF(x, y, x, y);
         rect.offset(getScrollX(), getScrollY());
 
-        for (final Page page : model.getPages(firstVisiblePage, lastVisiblePage + 1)) {
-            final RectF bounds = page.getBounds(zoom);
-            if (RectF.intersects(bounds, rect)) {
-                if (LengthUtils.isNotEmpty(page.links)) {
-                    for (final PageLink link : page.links) {
-                        if (processLinkTap(page, link, bounds, rect)) {
-                            return true;
+        final PageIterator pages = model.getPages(firstVisiblePage, lastVisiblePage + 1);
+        try {
+            final RectF bounds = new RectF();
+            for (final Page page : pages) {
+                page.getBounds(zoom, bounds);
+                if (RectF.intersects(bounds, rect)) {
+                    if (LengthUtils.isNotEmpty(page.links)) {
+                        for (final PageLink link : page.links) {
+                            if (processLinkTap(page, link, bounds, rect)) {
+                                return true;
+                            }
                         }
                     }
+                    return false;
                 }
-                return false;
             }
+        } finally {
+            pages.release();
         }
         return false;
     }
@@ -470,7 +581,7 @@ public abstract class AbstractViewController extends AbstractComponentController
             LCTX.d("Page link found under tap: " + link);
         }
 
-        goToLink(link.targetPage, link.targetRect, true);
+        goToLink(link.targetPage, link.targetRect, AppSettings.current().storeLinkGotoHistory);
         return true;
     }
 
@@ -480,35 +591,27 @@ public abstract class AbstractViewController extends AbstractComponentController
      * @see org.ebookdroid.ui.viewer.IViewController#goToLink(int, android.graphics.RectF)
      */
     @Override
-    public void goToLink(final int pageDocIndex, final RectF targetRect, boolean addToHistory) {
+    public void goToLink(final int pageDocIndex, final RectF targetRect, final boolean addToHistory) {
         if (pageDocIndex >= 0) {
-            Page target = model.getPageByDocIndex(pageDocIndex);
-            float offsetX = 0;
-            float offsetY = 0;
-            if (targetRect != null) {
-                offsetX = targetRect.left;
-                offsetY = targetRect.top;
-                if (target.type == PageType.LEFT_PAGE && offsetX >= 0.5f) {
-                    target = model.getPageObject(target.index.viewIndex + 1);
-                    offsetX -= 0.5f;
-                }
-            }
+            final PointF linkPoint = new PointF();
+            final Page target = model.getLinkTargetPage(pageDocIndex, targetRect, linkPoint,
+                    base.getBookSettings().splitRTL);
             if (LCTX.isDebugEnabled()) {
                 LCTX.d("Target page found: " + target);
             }
             if (target != null) {
-                base.jumpToPage(target.index.viewIndex, offsetX, offsetY, addToHistory);
+                base.jumpToPage(target.index.viewIndex, linkPoint.x, linkPoint.y, addToHistory);
             }
         }
     }
 
     protected class GestureListener extends SimpleOnGestureListener implements IMultiTouchListener {
 
-        protected final LogContext LCTX = LogContext.ROOT.lctx("Gesture", false);
+        protected final LogContext LCTX = LogManager.root().lctx("Gesture", false);
 
         /**
          * {@inheritDoc}
-         * 
+         *
          * @see android.view.GestureDetector.SimpleOnGestureListener#onDoubleTap(android.view.MotionEvent)
          */
         @Override
@@ -521,7 +624,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
         /**
          * {@inheritDoc}
-         * 
+         *
          * @see android.view.GestureDetector.SimpleOnGestureListener#onDown(android.view.MotionEvent)
          */
         @Override
@@ -535,7 +638,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
         /**
          * {@inheritDoc}
-         * 
+         *
          * @see android.view.GestureDetector.SimpleOnGestureListener#onFling(android.view.MotionEvent,
          *      android.view.MotionEvent, float, float)
          */
@@ -559,7 +662,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
         /**
          * {@inheritDoc}
-         * 
+         *
          * @see android.view.GestureDetector.SimpleOnGestureListener#onScroll(android.view.MotionEvent,
          *      android.view.MotionEvent, float, float)
          */
@@ -581,7 +684,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
         /**
          * {@inheritDoc}
-         * 
+         *
          * @see android.view.GestureDetector.SimpleOnGestureListener#onSingleTapUp(android.view.MotionEvent)
          */
         @Override
@@ -594,7 +697,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
         /**
          * {@inheritDoc}
-         * 
+         *
          * @see android.view.GestureDetector.SimpleOnGestureListener#onSingleTapConfirmed(android.view.MotionEvent)
          */
         @Override
@@ -607,7 +710,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
         /**
          * {@inheritDoc}
-         * 
+         *
          * @see android.view.GestureDetector.SimpleOnGestureListener#onLongPress(android.view.MotionEvent)
          */
         @Override
@@ -621,7 +724,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
         /**
          * {@inheritDoc}
-         * 
+         *
          * @see org.ebookdroid.common.touch.IMultiTouchListener#onTwoFingerPinch(float, float)
          */
         @Override
@@ -635,7 +738,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
         /**
          * {@inheritDoc}
-         * 
+         *
          * @see org.ebookdroid.common.touch.IMultiTouchListener#onTwoFingerPinchEnd()
          */
         @Override
@@ -648,7 +751,7 @@ public abstract class AbstractViewController extends AbstractComponentController
 
         /**
          * {@inheritDoc}
-         * 
+         *
          * @see org.ebookdroid.common.touch.IMultiTouchListener#onTwoFingerTap()
          */
         @Override

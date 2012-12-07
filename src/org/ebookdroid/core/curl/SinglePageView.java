@@ -1,8 +1,7 @@
 package org.ebookdroid.core.curl;
 
-import org.ebookdroid.common.log.LogContext;
-import org.ebookdroid.common.settings.SettingsManager;
-import org.ebookdroid.core.EventDraw;
+import org.ebookdroid.common.settings.AppSettings;
+import org.ebookdroid.core.EventGLDraw;
 import org.ebookdroid.core.Page;
 import org.ebookdroid.core.SinglePageController;
 import org.ebookdroid.core.ViewState;
@@ -10,9 +9,12 @@ import org.ebookdroid.ui.viewer.views.DragMark;
 
 import android.view.MotionEvent;
 
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
+
 public class SinglePageView implements PageAnimator {
 
-    protected static final LogContext LCTX = LogContext.ROOT.lctx("View", false);
+    protected static final LogContext LCTX = LogManager.root().lctx("View", false);
 
     protected final PageAnimationType type;
 
@@ -28,7 +30,7 @@ public class SinglePageView implements PageAnimator {
         this(PageAnimationType.NONE, view);
     }
 
-    protected SinglePageView(PageAnimationType type, final SinglePageController view) {
+    protected SinglePageView(final PageAnimationType type, final SinglePageController view) {
         this.type = type;
         this.view = view;
     }
@@ -86,15 +88,15 @@ public class SinglePageView implements PageAnimator {
     /**
      * {@inheritDoc}
      *
-     * @see org.ebookdroid.core.curl.PageAnimator#draw(org.ebookdroid.core.EventDraw)
+     * @see org.ebookdroid.core.curl.PageAnimator#draw(org.ebookdroid.core.EventGLDraw)
      */
     @Override
-    public void draw(EventDraw event) {
+    public void draw(final EventGLDraw event) {
         final Page page = event.viewState.model.getCurrentPageObject();
         if (page != null) {
             event.process(page);
-            if (SettingsManager.getAppSettings().showAnimIcon) {
-                DragMark.draw(event.canvas, event.viewState);
+            if (AppSettings.current().showAnimIcon) {
+                DragMark.DRAG.draw(event.canvas, event.viewState);
             }
         }
     }
@@ -149,7 +151,7 @@ public class SinglePageView implements PageAnimator {
      * @see org.ebookdroid.core.curl.PageAnimator#animate(int)
      */
     @Override
-    public void animate(int direction) {
+    public void animate(final int direction) {
         view.goToPage(view.model.getCurrentViewPageIndex() + direction);
     }
 

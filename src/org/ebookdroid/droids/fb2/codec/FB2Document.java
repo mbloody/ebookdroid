@@ -1,147 +1,197 @@
 package org.ebookdroid.droids.fb2.codec;
 
-import org.ebookdroid.core.codec.CodecDocument;
+import static org.ebookdroid.droids.fb2.codec.FB2Page.MARGIN_X;
+import static org.ebookdroid.droids.fb2.codec.FB2Page.MARGIN_Y;
+import static org.ebookdroid.droids.fb2.codec.FB2Page.PAGE_HEIGHT;
+import static org.ebookdroid.droids.fb2.codec.FB2Page.PAGE_WIDTH;
+
+import org.ebookdroid.common.settings.AppSettings;
+import org.ebookdroid.core.codec.AbstractCodecDocument;
 import org.ebookdroid.core.codec.CodecPage;
 import org.ebookdroid.core.codec.CodecPageInfo;
 import org.ebookdroid.core.codec.OutlineLink;
+import org.ebookdroid.droids.fb2.codec.handlers.StandardHandler;
+import org.ebookdroid.droids.fb2.codec.tags.FB2TagFactory;
 
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.RectF;
 
 import java.io.BufferedReader;
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.List;
-import java.util.TreeMap;
+import java.util.ListIterator;
+import java.util.concurrent.atomic.AtomicLong;
 
-import javax.xml.parsers.SAXParser;
-import javax.xml.parsers.SAXParserFactory;
-
+import org.emdev.common.archives.zip.ZipArchive;
+import org.emdev.common.archives.zip.ZipArchiveEntry;
+import org.emdev.common.textmarkup.JustificationMode;
+import org.emdev.common.textmarkup.MarkupElement;
+import org.emdev.common.textmarkup.MarkupTitle;
+import org.emdev.common.textmarkup.TextStyle;
+import org.emdev.common.textmarkup.Words;
+import org.emdev.common.textmarkup.line.HorizontalRule;
+import org.emdev.common.textmarkup.line.Line;
+import org.emdev.common.textmarkup.line.LineStream;
+import org.emdev.common.xml.TextProvider;
+import org.emdev.common.xml.parsers.DuckbillParser;
+import org.emdev.common.xml.parsers.SaxParser;
+import org.emdev.common.xml.parsers.VTDExParser;
 import org.emdev.utils.LengthUtils;
-import org.emdev.utils.archives.zip.ZipArchive;
-import org.emdev.utils.archives.zip.ZipArchiveEntry;
-import org.xml.sax.InputSource;
 
-public class FB2Document implements CodecDocument {
+import com.ximpleware.VTDGenEx;
 
-    private final TreeMap<String, FB2Image> images = new TreeMap<String, FB2Image>();
-    private final TreeMap<String, ArrayList<FB2Line>> notes = new TreeMap<String, ArrayList<FB2Line>>();
-
-    JustificationMode jm = JustificationMode.Justify;
+public class FB2Document extends AbstractCodecDocument {
 
     private final ArrayList<FB2Page> pages = new ArrayList<FB2Page>();
-    private final ArrayList<FB2Line> paragraphLines = new ArrayList<FB2Line>();
-
-    private String cover;
 
     private final List<OutlineLink> outline = new ArrayList<OutlineLink>();
 
-    boolean insertSpace = true;
+    private final ParsedContent content = new ParsedContent();
 
-    public FB2Document(final String fileName) {
-        final SAXParserFactory spf = SAXParserFactory.newInstance();
+    public FB2Document(final FB2Context context, final String fileName) {
+        super(context, context.getContextHandle());
 
+        Words.clear();
+
+        final long t1 = System.currentTimeMillis();
+        content.loadFonts();
         final long t2 = System.currentTimeMillis();
-        final List<FB2MarkupElement> markup = parseContent(spf, fileName);
+        System.out.println("Fonts preloading: " + (t2 - t1) + " ms");
+
+        switch (AppSettings.current().fb2XmlParser) {
+            case Duckbill:
+                parseWithDuckbill(fileName);
+                break;
+            case VTDEx:
+                parseWithVTDEx(fileName);
+                break;
+            default:
+                parseWithSax(fileName);
+                break;
+        }
+
+        System.out.println("Words=" + Words.words + ", uniques=" + Words.uniques);
+
         final long t3 = System.currentTimeMillis();
-        System.out.println("SAX parser: " + (t3 - t2) + " ms");
-        System.out.println("Words=" + FB2Words.words + ", uniques=" + FB2Words.uniques);
-        createDocumentMarkup(markup);
+
+        final ArrayList<MarkupElement> mainStream = content.getMarkupStream(null);
+        final LineStream documentLines = content.createLines(mainStream, PAGE_WIDTH - 2 * MARGIN_X,
+                JustificationMode.Justify, AppSettings.current().fb2HyphenEnabled);
+        createPages(documentLines);
 
         final long t4 = System.currentTimeMillis();
         System.out.println("Markup: " + (t4 - t3) + " ms");
+
+        final int removed = removeEmptyPages(true);
+        content.clear();
+
+        final long t5 = System.currentTimeMillis();
+        System.out.println("Cleanup: " + (t5 - t4) + " ms, removed: " + removed);
+
+        // System.gc();
     }
 
-    private void createDocumentMarkup(final List<FB2MarkupElement> markup) {
+    private void createPages(final LineStream documentLines) {
         pages.clear();
-        jm = JustificationMode.Justify;
-        for (final FB2MarkupElement me : markup) {
-            if (me instanceof FB2MarkupEndDocument) {
-                break;
-            }
-            me.publishToDocument(this);
+        if (LengthUtils.isEmpty(documentLines)) {
+            return;
         }
-        markup.clear();
-        notes.clear();
+
+        for (final Line line : documentLines) {
+            FB2Page lastPage = getLastPage();
+
+            if (lastPage.contentHeight + 2 * MARGIN_Y + line.getTotalHeight() > PAGE_HEIGHT) {
+                commitPage();
+                lastPage = new FB2Page();
+                pages.add(lastPage);
+            }
+
+            lastPage.appendLine(line);
+            final MarkupTitle title = line.getTitle();
+            if (title != null) {
+                addTitle(title);
+            }
+
+            final LineStream footnotes = line.getFootNotes();
+            if (footnotes != null) {
+                final Iterator<Line> iterator = footnotes.iterator();
+                if (lastPage.noteLines.size() > 0 && iterator.hasNext()) {
+                    // Skip rule for non first note on page
+                    iterator.next();
+                }
+                while (iterator.hasNext()) {
+                    final Line l = iterator.next();
+                    lastPage = getLastPage();
+                    if (lastPage.contentHeight + 2 * MARGIN_Y + l.getTotalHeight() > PAGE_HEIGHT) {
+                        commitPage();
+                        lastPage = new FB2Page();
+                        pages.add(lastPage);
+                        final Line ruleLine = new Line(content, PAGE_WIDTH / 4, JustificationMode.Left);
+                        ruleLine.append(new HorizontalRule(PAGE_WIDTH / 4, TextStyle.FOOTNOTE.getFontSize()));
+                        ruleLine.applyJustification(JustificationMode.Left);
+                        lastPage.appendNoteLine(ruleLine);
+                    }
+                    lastPage.appendNoteLine(l);
+                }
+            }
+        }
+        commitPage();
     }
 
-    private List<FB2MarkupElement> parseContent(final SAXParserFactory spf, final String fileName) {
-        final FB2ContentHandler h = new FB2ContentHandler(this);
+    private int removeEmptyPages(final boolean all) {
+        int count = 0;
+        final ListIterator<FB2Page> i = pages.listIterator(pages.size());
+        if (all) {
+            while (i.hasPrevious()) {
+                final FB2Page p = i.previous();
+                if (p.isEmpty()) {
+                    i.remove();
+                    count++;
+                }
+            }
+        } else {
+            while (i.hasPrevious()) {
+                final FB2Page p = i.previous();
+                if (p.isEmpty()) {
+                    i.remove();
+                    count++;
+                } else {
+                    break;
+                }
+            }
+        }
+        return count;
+    }
+
+    private void parseWithSax(final String fileName) {
+        final StandardHandler h = new StandardHandler(content);
         final List<Closeable> resources = new ArrayList<Closeable>();
 
+        final long t1 = System.currentTimeMillis();
         try {
-            InputStream inStream = null;
+            final AtomicLong size = new AtomicLong();
+            final InputStream inStream = getInputStream(fileName, size, resources);
 
-            if (fileName.endsWith("zip")) {
-                final ZipArchive zipArchive = new ZipArchive(new File(fileName));
-
-                final Enumeration<ZipArchiveEntry> entries = zipArchive.entries();
-                while (entries.hasMoreElements()) {
-                    final ZipArchiveEntry entry = entries.nextElement();
-                    if (!entry.isDirectory() && entry.getName().endsWith("fb2")) {
-                        inStream = entry.open();
-                        resources.add(inStream);
-                        break;
-                    }
-                }
-                resources.add(zipArchive);
-            } else {
-                inStream = new FileInputStream(fileName);
-                resources.add(inStream);
-            }
             if (inStream != null) {
 
-                String encoding = "utf-8";
-                final char[] buffer = new char[256];
-                boolean found = false;
-                int len = 0;
-                while (len < 256) {
-                    final int val = inStream.read();
-                    if (len == 0 && (val == 0xEF || val == 0xBB || val == 0xBF)) {
-                        continue;
-                    }
-                    buffer[len++] = (char) val;
-                    if (val == '>') {
-                        found = true;
-                        break;
-                    }
-                }
-                if (found) {
-                    final String xmlheader = new String(buffer, 0, len).trim();
-                    if (xmlheader.startsWith("<?xml") && xmlheader.endsWith("?>")) {
-                        final int index = xmlheader.indexOf("encoding");
-                        if (index > 0) {
-                            final int startIndex = xmlheader.indexOf('"', index);
-                            if (startIndex > 0) {
-                                final int endIndex = xmlheader.indexOf('"', startIndex + 1);
-                                if (endIndex > 0) {
-                                    encoding = xmlheader.substring(startIndex + 1, endIndex);
-                                    System.out.println("XML encoding:" + encoding);
-                                }
-                            }
-                        }
-                    } else {
-                        throw new RuntimeException("FB2 document can not be opened: " + "Invalid header");
-                    }
-                } else {
-                    throw new RuntimeException("FB2 document can not be opened: " + "Header not found");
-                }
+                final String encoding = getEncoding(inStream);
 
                 final Reader isr = new BufferedReader(new InputStreamReader(inStream, encoding), 32 * 1024);
                 resources.add(isr);
-                final InputSource is = new InputSource();
-                is.setCharacterStream(isr);
-                final SAXParser parser = spf.newSAXParser();
-                parser.parse(is, h);
+
+                final SaxParser p = new SaxParser();
+                p.parse(isr, FB2TagFactory.instance, h);
             }
         } catch (final StopParsingException e) {
             // do nothing
@@ -157,41 +207,174 @@ public class FB2Document implements CodecDocument {
                 }
             }
             resources.clear();
+            final long t2 = System.currentTimeMillis();
+            System.out.println("SAX parser: " + (t2 - t1) + " ms");
         }
-        return h.markup;
     }
 
-    void appendLine(final FB2Line line) {
-        FB2Page lastPage = FB2Page.getLastPage(pages);
+    private void parseWithVTDEx(final String fileName) {
+        final StandardHandler h = new StandardHandler(content, false);
+        final List<Closeable> resources = new ArrayList<Closeable>();
 
-        if (lastPage.contentHeight + 2 * FB2Page.MARGIN_Y + line.getTotalHeight() > FB2Page.PAGE_HEIGHT) {
-            commitPage();
-            lastPage = new FB2Page();
-            pages.add(lastPage);
-        }
-        lastPage.appendLine(line);
-        final List<FB2Line> footnotes = line.getFootNotes();
-        if (footnotes != null) {
-            final Iterator<FB2Line> iterator = footnotes.iterator();
-            if (lastPage.noteLines.size() > 0 && iterator.hasNext()) {
-                // Skip rule for non first note on page
-                iterator.next();
+        final long t1 = System.currentTimeMillis();
+        try {
+            final AtomicLong size = new AtomicLong();
+            final InputStream inStream = getInputStream(fileName, size, resources);
+
+            if (inStream != null) {
+                final TextProvider text = loadContent(inStream, size, resources);
+
+                final long t2 = System.currentTimeMillis();
+                System.out.println("VTDEx  load: " + (t2 - t1) + " ms");
+
+                final VTDGenEx gen = new VTDGenEx();
+                gen.setDoc(text.chars, 0, text.size);
+                gen.parse(false);
+
+                final long t3 = System.currentTimeMillis();
+                System.out.println("VTDEx parse: " + (t3 - t2) + " ms");
+
+                final VTDExParser p = new VTDExParser();
+                p.parse(gen, FB2TagFactory.instance, h);
+
+                final long t4 = System.currentTimeMillis();
+                System.out.println("VTDEx  scan: " + (t4 - t3) + " ms");
             }
-            while (iterator.hasNext()) {
-                final FB2Line l = iterator.next();
-                lastPage = FB2Page.getLastPage(pages);
-                if (lastPage.contentHeight + 2 * FB2Page.MARGIN_Y + l.getTotalHeight() > FB2Page.PAGE_HEIGHT) {
-                    commitPage();
-                    lastPage = new FB2Page();
-                    pages.add(lastPage);
-                    final FB2Line ruleLine = new FB2Line();
-                    ruleLine.append(new FB2HorizontalRule(FB2Page.PAGE_WIDTH / 4, FB2FontStyle.FOOTNOTE.getFontSize()));
-                    ruleLine.applyJustification(JustificationMode.Left);
-                    lastPage.appendNoteLine(ruleLine);
+        } catch (final Exception e) {
+            throw new RuntimeException("FB2 document can not be opened: " + e.getMessage(), e);
+        } finally {
+            for (final Closeable r : resources) {
+                try {
+                    if (r != null) {
+                        r.close();
+                    }
+                } catch (final IOException e) {
                 }
-                lastPage.appendNoteLine(l);
+            }
+            resources.clear();
+        }
+    }
+
+    private void parseWithDuckbill(final String fileName) {
+        final StandardHandler h = new StandardHandler(content, false);
+        final List<Closeable> resources = new ArrayList<Closeable>();
+
+        final long t1 = System.currentTimeMillis();
+        try {
+            final AtomicLong size = new AtomicLong();
+            final InputStream inStream = getInputStream(fileName, size, resources);
+
+            if (inStream != null) {
+                final TextProvider text = loadContent(inStream, size, resources);
+
+                final long t2 = System.currentTimeMillis();
+                System.out.println("DUCK  load: " + (t2 - t1) + " ms");
+
+                final DuckbillParser p = new DuckbillParser();
+                p.parse(text, FB2TagFactory.instance, h);
+
+                final long t4 = System.currentTimeMillis();
+                System.out.println("DUCK  parse: " + (t4 - t2) + " ms");
+            }
+        } catch (final Exception e) {
+            throw new RuntimeException("FB2 document can not be opened: " + e.getMessage(), e);
+        } finally {
+            for (final Closeable r : resources) {
+                try {
+                    if (r != null) {
+                        r.close();
+                    }
+                } catch (final IOException e) {
+                }
+            }
+            resources.clear();
+        }
+    }
+
+    private TextProvider loadContent(final InputStream inStream, final AtomicLong size, final List<Closeable> resources)
+            throws IOException, UnsupportedEncodingException {
+        final String encoding = getEncoding(inStream);
+        final Reader isr = new InputStreamReader(inStream, encoding);
+        resources.add(isr);
+
+        final char[] chars = new char[(int) size.get()];
+        int offset = 0;
+        for (int len = chars.length; offset < len;) {
+            final int n = isr.read(chars, offset, len);
+            if (n == -1) {
+                break;
+            }
+            offset += n;
+            len -= n;
+        }
+        size.set(offset);
+        return new TextProvider(chars, offset);
+    }
+
+    private String getEncoding(final InputStream inStream) throws IOException {
+        String encoding = "utf-8";
+        final char[] buffer = new char[256];
+        boolean found = false;
+        int len = 0;
+        while (len < 256) {
+            final int val = inStream.read();
+            if (len == 0 && (val == 0xEF || val == 0xBB || val == 0xBF)) {
+                continue;
+            }
+            buffer[len++] = (char) val;
+            if (val == '>') {
+                found = true;
+                break;
             }
         }
+        if (found) {
+            final String xmlheader = new String(buffer, 0, len).trim();
+            if (xmlheader.startsWith("<?xml") && xmlheader.endsWith("?>")) {
+                final int index = xmlheader.indexOf("encoding");
+                if (index > 0) {
+                    final int startIndex = xmlheader.indexOf('"', index);
+                    if (startIndex > 0) {
+                        final int endIndex = xmlheader.indexOf('"', startIndex + 1);
+                        if (endIndex > 0) {
+                            encoding = xmlheader.substring(startIndex + 1, endIndex);
+                            System.out.println("XML encoding:" + encoding);
+                        }
+                    }
+                }
+            } else {
+                throw new RuntimeException("FB2 document can not be opened: " + "Invalid header");
+            }
+        } else {
+            throw new RuntimeException("FB2 document can not be opened: " + "Header not found");
+        }
+        return encoding;
+    }
+
+    private InputStream getInputStream(final String fileName, final AtomicLong size, final List<Closeable> resources)
+            throws IOException, FileNotFoundException {
+        InputStream inStream = null;
+
+        if (fileName.endsWith("zip")) {
+            final ZipArchive zipArchive = new ZipArchive(new File(fileName));
+
+            final Enumeration<ZipArchiveEntry> entries = zipArchive.entries();
+            while (entries.hasMoreElements()) {
+                final ZipArchiveEntry entry = entries.nextElement();
+                if (!entry.isDirectory() && entry.getName().endsWith("fb2")) {
+                    size.set(entry.getSize());
+                    inStream = entry.open();
+                    resources.add(inStream);
+                    break;
+                }
+            }
+            resources.add(zipArchive);
+        } else {
+            final File f = new File(fileName);
+            size.set(f.length());
+            inStream = new FileInputStream(f);
+            resources.add(inStream);
+        }
+        return inStream;
     }
 
     @Override
@@ -224,175 +407,47 @@ public class FB2Document implements CodecDocument {
     }
 
     @Override
-    public boolean isRecycled() {
-        return false;
-    }
-
-    @Override
-    public void recycle() {
+    protected void freeDocument() {
+        content.recycle();
+        for (final FB2Page p : pages) {
+            p.finalRecycle();
+        }
+        pages.clear();
     }
 
     void commitPage() {
-        final FB2Page lastPage = FB2Page.getLastPage(pages);
-        lastPage.commit();
-    }
-
-    public void addImage(final String tmpBinaryName, final String encoded) {
-        if (tmpBinaryName != null && encoded != null) {
-            images.put("I" + tmpBinaryName, new FB2Image(encoded, true));
-            images.put("O" + tmpBinaryName, new FB2Image(encoded, false));
-        }
-    }
-
-    public FB2Image getImage(final String name, final boolean inline) {
-        if (name == null) {
-            return null;
-        }
-        FB2Image img = images.get((inline ? "I" : "O") + name);
-        if (img == null && name.startsWith("#")) {
-            img = images.get((inline ? "I" : "O") + name.substring(1));
-        }
-        return img;
-    }
-
-    public void addNote(final String noteName, final ArrayList<FB2Line> noteLines) {
-        if (noteName != null && noteLines != null) {
-            notes.put(noteName, noteLines);
-        }
-    }
-
-    public List<FB2Line> getNote(final String noteName) {
-        List<FB2Line> note = notes.get(noteName);
-        if (note == null && noteName.startsWith("#")) {
-            note = notes.get(noteName.substring(1));
-        }
-        return note;
-    }
-
-    public void setCover(final String value) {
-        this.cover = value;
+        getLastPage().commit(content);
     }
 
     @Override
     public Bitmap getEmbeddedThumbnail() {
-        final FB2Image image = getImage(cover, false);
-        if (image != null) {
-            final byte[] data = image.getData();
-            return BitmapFactory.decodeByteArray(data, 0, data.length);
-        }
-        return null;
+        return content.getCoverImage();
     }
 
-    public void publishElement(final AbstractFB2LineElement le) {
-        FB2Line line = FB2Line.getLastLine(paragraphLines);
-        final FB2LineWhiteSpace space = RenderingStyle.getTextPaint(line.getHeight()).space;
-        final float remaining = FB2Page.PAGE_WIDTH - (line.width + 2 * FB2Page.MARGIN_X + space.width);
-        if (le.width < remaining) {
-            if (line.hasNonWhiteSpaces() && insertSpace) {
-                line.append(space);
-            }
-            line.append(le);
-            insertSpace = true;
-        } else {
-            final AbstractFB2LineElement[] splitted = le.split(remaining);
-            if (splitted != null && splitted.length > 1) {
-                if (line.hasNonWhiteSpaces() && insertSpace) {
-                    line.append(space);
-                }
-                for (int i = 0; i < splitted.length - 1; i++) {
-                    line.append(splitted[i]);
-                }
-            }
-
-            line = new FB2Line();
-            paragraphLines.add(line);
-
-            line.append(splitted == null ? le : splitted[splitted.length - 1]);
-            insertSpace = true;
-        }
-    }
-
-    public void commitParagraph() {
-        if (paragraphLines.isEmpty()) {
-            return;
-        }
-        final FB2Line last = FB2Line.getLastLine(paragraphLines);
-        final JustificationMode lastJm = jm == JustificationMode.Justify ? JustificationMode.Left : jm;
-        for (final FB2Line l : paragraphLines) {
-            l.applyJustification(l != last ? jm : lastJm);
-            appendLine(l);
-        }
-        paragraphLines.clear();
-    }
-
-    public void publishImage(final String ref, final boolean inline) {
-        final FB2Image image = getImage(ref, inline);
-        if (image != null) {
-            if (!inline) {
-                final FB2Line line = new FB2Line();
-                line.append(image);
-                line.applyJustification(JustificationMode.Center);
-                appendLine(line);
-            } else {
-                publishElement(image);
-            }
-        }
-    }
-
-    public void publishNote(final String ref) {
-        final List<FB2Line> note = getNote(ref);
-        if (note != null && !paragraphLines.isEmpty()) {
-            final FB2Line line = FB2Line.getLastLine(paragraphLines);
-            line.addNote(note);
-        }
-    }
-
-    public void addTitle(final FB2MarkupTitle title) {
+    public void addTitle(final MarkupTitle title) {
         outline.add(new OutlineLink(title.title, "#" + pages.size(), title.level));
     }
 
     @Override
-    public List<? extends RectF> searchText(final int pageNuber, final String pattern) throws DocSearchNotSupported {
+    public List<? extends RectF> searchText(final int pageNuber, final String pattern) {
         if (LengthUtils.isEmpty(pattern)) {
             return null;
         }
 
         final FB2Page page = (FB2Page) getPage(pageNuber);
-        if (page == null) {
-            return null;
-        }
+        return (page == null) ? null : page.searchText(pattern);
 
-        final List<RectF> rects = new ArrayList<RectF>();
-
-        final char[] charArray = pattern.toCharArray();
-        final float y = searchText(page.lines, charArray, rects, FB2Page.MARGIN_Y);
-
-        searchText(page.noteLines, charArray, rects, y);
-
-        return rects;
     }
 
-    private float searchText(final ArrayList<FB2Line> lines, final char[] pattern, final List<RectF> rects, float y) {
-        for (int i = 0, n = lines.size(); i < n; i++) {
-            final FB2Line line = lines.get(i);
-            final float top = y;
-            final float bottom = y + line.getHeight();
-            line.ensureJustification();
-            float x = FB2Page.MARGIN_X;
-            for (int i1 = 0, n1 = line.elements.size(); i1 < n1; i1++) {
-                final AbstractFB2LineElement e = line.elements.get(i1);
-                final float w = e.width + (e instanceof FB2LineWhiteSpace ? line.spaceWidth : 0);
-                if (e instanceof FB2TextElement) {
-                    final FB2TextElement textElement = (FB2TextElement) e;
-                    if (textElement.indexOf(pattern) != -1) {
-                        rects.add(new RectF(x / FB2Page.PAGE_WIDTH, top / FB2Page.PAGE_HEIGHT, (x + w)
-                                / FB2Page.PAGE_WIDTH, bottom / FB2Page.PAGE_HEIGHT));
-                    }
-                }
-                x += w;
-            }
-            y = bottom;
+    public FB2Page getLastPage() {
+        if (pages.size() == 0) {
+            pages.add(new FB2Page());
         }
-        return y;
+        FB2Page fb2Page = pages.get(pages.size() - 1);
+        if (fb2Page.committed) {
+            fb2Page = new FB2Page();
+            pages.add(fb2Page);
+        }
+        return fb2Page;
     }
 }

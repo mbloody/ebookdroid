@@ -1,6 +1,5 @@
 package org.ebookdroid.core;
 
-import org.ebookdroid.common.settings.SettingsManager;
 import org.ebookdroid.common.settings.books.BookSettings;
 import org.ebookdroid.ui.viewer.IActivityController;
 
@@ -17,7 +16,10 @@ public class NavigationHistory {
     }
 
     public void update() {
-        history.addFirst(new Position(SettingsManager.getBookSettings()));
+        final BookSettings bs = base.getBookSettings();
+        if (bs != null) {
+            history.addFirst(new Position(bs));
+        }
     }
 
     public boolean goBack() {
@@ -39,8 +41,8 @@ public class NavigationHistory {
 
         Position(final BookSettings bs) {
             this.index = bs.currentPage;
-            this.offsetX = SettingsManager.getBookSettings().offsetX;
-            this.offsetY = SettingsManager.getBookSettings().offsetY;
+            this.offsetX = bs.offsetX;
+            this.offsetY = bs.offsetY;
         }
     }
 }

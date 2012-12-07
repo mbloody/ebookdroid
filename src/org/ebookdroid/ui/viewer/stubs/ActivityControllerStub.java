@@ -1,9 +1,11 @@
 package org.ebookdroid.ui.viewer.stubs;
 
 import org.ebookdroid.EBookDroidApp;
+import org.ebookdroid.common.settings.books.BookSettings;
 import org.ebookdroid.core.DecodeService;
 import org.ebookdroid.core.models.DecodingProgressModel;
 import org.ebookdroid.core.models.DocumentModel;
+import org.ebookdroid.core.models.SearchModel;
 import org.ebookdroid.core.models.ZoomModel;
 import org.ebookdroid.ui.viewer.IActivityController;
 import org.ebookdroid.ui.viewer.IView;
@@ -20,7 +22,11 @@ public class ActivityControllerStub extends ActionController<ViewerActivity> imp
 
     public static final ActivityControllerStub STUB = new ActivityControllerStub();
 
-    public static final DocumentModel MODEL_STUB = new DocumentModel(null);
+    public static final DocumentModel DM_STUB = new DocumentModel(null);
+
+    public static final ZoomModel ZM_STUB = new ZoomModel();
+
+    private SearchModel SEARCH_STUB = new SearchModel(this);
 
     private ActivityControllerStub() {
         super(null, null);
@@ -42,8 +48,13 @@ public class ActivityControllerStub extends ActionController<ViewerActivity> imp
     }
 
     @Override
+    public BookSettings getBookSettings() {
+        return null;
+    }
+
+    @Override
     public DocumentModel getDocumentModel() {
-        return MODEL_STUB;
+        return DM_STUB;
     }
 
     @Override
@@ -63,7 +74,7 @@ public class ActivityControllerStub extends ActionController<ViewerActivity> imp
 
     @Override
     public ZoomModel getZoomModel() {
-        return null;
+        return ZM_STUB;
     }
 
     @Override
@@ -72,11 +83,15 @@ public class ActivityControllerStub extends ActionController<ViewerActivity> imp
     }
 
     @Override
-    public IViewController switchDocumentController() {
-        return null;
+    public void jumpToPage(final int viewIndex, final float offsetX, final float offsetY, final boolean addToHistory) {
     }
 
     @Override
-    public void jumpToPage(final int viewIndex, final float offsetX, final float offsetY, final boolean addToHistory) {
+    public SearchModel getSearchModel() {
+        return SEARCH_STUB;
+    }
+
+    @Override
+    public void runOnUiThread(final Runnable r) {
     }
 }

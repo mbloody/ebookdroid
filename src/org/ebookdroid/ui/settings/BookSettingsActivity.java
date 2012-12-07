@@ -1,6 +1,7 @@
 package org.ebookdroid.ui.settings;
 
 import org.ebookdroid.R;
+import org.ebookdroid.common.settings.AppSettings;
 import org.ebookdroid.common.settings.SettingsManager;
 import org.ebookdroid.common.settings.books.BookSettings;
 
@@ -9,26 +10,31 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
 
-import org.emdev.utils.android.AndroidVersion;
-import org.emdev.utils.filesystem.PathFromUri;
+import org.emdev.common.filesystem.PathFromUri;
 
 public class BookSettingsActivity extends BaseSettingsActivity {
 
+    private BookSettings current;
+
+    @SuppressWarnings("deprecation")
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        setRequestedOrientation(SettingsManager.getAppSettings().rotation.getOrientation());
-
         final Uri uri = getIntent().getData();
         final String fileName = PathFromUri.retrieve(getContentResolver(), uri);
-        final BookSettings bs = SettingsManager.getBookSettings(fileName);
-        if (bs == null) {
+        current = SettingsManager.getBookSettings(fileName);
+        if (current == null) {
             finish();
+            return;
         }
 
+        setRequestedOrientation(current.getOrientation(AppSettings.current()));
+
+        SettingsManager.onBookSettingsActivityCreated(current);
+
         try {
-            addPreferencesFromResource(AndroidVersion.lessThan3x ? R.xml.books_prefs : R.xml.fragment_book);
+            addPreferencesFromResource(R.xml.fragment_book);
         } catch (final ClassCastException e) {
             LCTX.e("Book preferences are corrupt! Resetting to default values.");
 
@@ -37,16 +43,17 @@ public class BookSettingsActivity extends BaseSettingsActivity {
             editor.clear();
             editor.commit();
 
-            PreferenceManager.setDefaultValues(this, R.xml.books_prefs, true);
-            addPreferencesFromResource(R.xml.books_prefs);
+            PreferenceManager.setDefaultValues(this, R.xml.fragment_book, true);
+            addPreferencesFromResource(R.xml.fragment_book);
         }
 
-        decorator.decorateBooksSettings();
+        decorator.decoratePreference(getRoot());
+        decorator.decorateBooksSettings(current);
     }
 
     @Override
     protected void onPause() {
-        SettingsManager.onBookSettingsChanged(null);
+        SettingsManager.onBookSettingsActivityClosed(current);
         super.onPause();
     }
 }

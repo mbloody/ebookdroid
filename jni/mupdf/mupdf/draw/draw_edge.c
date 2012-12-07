@@ -1,4 +1,4 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 #define BBOX_MIN -(1<<20)
 #define BBOX_MAX (1<<20)
@@ -20,7 +20,7 @@ struct fz_aa_context_s
 	int hscale;
 	int vscale;
 	int scale;
-	int level;
+	int bits;
 };
 
 void fz_new_aa_context(fz_context *ctx)
@@ -30,15 +30,21 @@ void fz_new_aa_context(fz_context *ctx)
 	ctx->aa->hscale = 17;
 	ctx->aa->vscale = 15;
 	ctx->aa->scale = 256;
-	ctx->aa->level = 8;
+	ctx->aa->bits = 8;
 
 #define fz_aa_hscale ((ctxaa)->hscale)
 #define fz_aa_vscale ((ctxaa)->vscale)
 #define fz_aa_scale ((ctxaa)->scale)
-#define fz_aa_level ((ctxaa)->level)
+#define fz_aa_bits ((ctxaa)->bits)
 #define AA_SCALE(x) ((x * fz_aa_scale) >> 8)
 
 #endif
+}
+
+void fz_copy_aa_context(fz_context *dst, fz_context *src)
+{
+	if (dst && dst->aa && src && src->aa)
+		memcpy(dst->aa, src->aa, sizeof(*src->aa));
 }
 
 void fz_free_aa_context(fz_context *ctx)
@@ -55,40 +61,40 @@ void fz_free_aa_context(fz_context *ctx)
 #define AA_SCALE(x) (x)
 #define fz_aa_hscale 17
 #define fz_aa_vscale 15
-#define fz_aa_level 8
+#define fz_aa_bits 8
 
 #elif AA_BITS > 4
 #define AA_SCALE(x) ((x * 255) >> 6)
 #define fz_aa_hscale 8
 #define fz_aa_vscale 8
-#define fz_aa_level 6
+#define fz_aa_bits 6
 
 #elif AA_BITS > 2
 #define AA_SCALE(x) (x * 17)
 #define fz_aa_hscale 5
 #define fz_aa_vscale 3
-#define fz_aa_level 4
+#define fz_aa_bits 4
 
 #elif AA_BITS > 0
 #define AA_SCALE(x) ((x * 255) >> 2)
 #define fz_aa_hscale 2
 #define fz_aa_vscale 2
-#define fz_aa_level 2
+#define fz_aa_bits 2
 
 #else
 #define AA_SCALE(x) (x * 255)
 #define fz_aa_hscale 1
 #define fz_aa_vscale 1
-#define fz_aa_level 0
+#define fz_aa_bits 0
 
 #endif
 #endif
 
 int
-fz_get_aa_level(fz_context *ctx)
+fz_aa_level(fz_context *ctx)
 {
 	fz_aa_context *ctxaa = ctx->aa;
-	return fz_aa_level;
+	return fz_aa_bits;
 }
 
 void
@@ -96,37 +102,37 @@ fz_set_aa_level(fz_context *ctx, int level)
 {
 	fz_aa_context *ctxaa = ctx->aa;
 #ifdef AA_BITS
-	fz_warn(ctx, "anti-aliasing was compiled with a fixed precision of %d bits", fz_aa_level);
+	fz_warn(ctx, "anti-aliasing was compiled with a fixed precision of %d bits", fz_aa_bits);
 #else
 	if (level > 6)
 	{
 		fz_aa_hscale = 17;
 		fz_aa_vscale = 15;
-		fz_aa_level = 8;
+		fz_aa_bits = 8;
 	}
 	else if (level > 4)
 	{
 		fz_aa_hscale = 8;
 		fz_aa_vscale = 8;
-		fz_aa_level = 6;
+		fz_aa_bits = 6;
 	}
 	else if (level > 2)
 	{
 		fz_aa_hscale = 5;
 		fz_aa_vscale = 3;
-		fz_aa_level = 4;
+		fz_aa_bits = 4;
 	}
 	else if (level > 0)
 	{
 		fz_aa_hscale = 2;
 		fz_aa_vscale = 2;
-		fz_aa_level = 2;
+		fz_aa_bits = 2;
 	}
 	else
 	{
 		fz_aa_hscale = 1;
 		fz_aa_vscale = 1;
-		fz_aa_level = 0;
+		fz_aa_bits = 0;
 	}
 	fz_aa_scale = 0xFF00 / (fz_aa_hscale * fz_aa_vscale);
 #endif
@@ -301,15 +307,16 @@ fz_insert_gel_raw(fz_gel *gel, int x0, int y0, int x1, int y1)
 	if (y1 > gel->bbox.y1) gel->bbox.y1 = y1;
 
 	if (gel->len + 1 == gel->cap) {
-		gel->cap = gel->cap + 512;
-		gel->edges = fz_resize_array(gel->ctx, gel->edges, gel->cap, sizeof(fz_edge));
+		int new_cap = gel->cap + 512;
+		gel->edges = fz_resize_array(gel->ctx, gel->edges, new_cap, sizeof(fz_edge));
+		gel->cap = new_cap;
 	}
 
 	edge = &gel->edges[gel->len++];
 
 	dy = y1 - y0;
 	dx = x1 - x0;
-	width = ABS(dx);
+	width = fz_absi(dx);
 
 	edge->xdir = dx > 0 ? 1 : -1;
 	edge->ydir = winding;
@@ -349,10 +356,14 @@ fz_insert_gel(fz_gel *gel, float fx0, float fy0, float fx1, float fy1)
 	fy0 = floorf(fy0 * fz_aa_vscale);
 	fy1 = floorf(fy1 * fz_aa_vscale);
 
-	x0 = CLAMP(fx0, BBOX_MIN * fz_aa_hscale, BBOX_MAX * fz_aa_hscale);
-	y0 = CLAMP(fy0, BBOX_MIN * fz_aa_vscale, BBOX_MAX * fz_aa_vscale);
-	x1 = CLAMP(fx1, BBOX_MIN * fz_aa_hscale, BBOX_MAX * fz_aa_hscale);
-	y1 = CLAMP(fy1, BBOX_MIN * fz_aa_vscale, BBOX_MAX * fz_aa_vscale);
+	/* Call fz_clamp so that clamping is done in the float domain, THEN
+	 * cast down to an int. Calling fz_clampi causes problems due to the
+	 * implicit cast down from float to int of the first argument
+	 * over/underflowing and flipping sign at extreme values. */
+	x0 = (int)fz_clamp(fx0, BBOX_MIN * fz_aa_hscale, BBOX_MAX * fz_aa_hscale);
+	y0 = (int)fz_clamp(fy0, BBOX_MIN * fz_aa_vscale, BBOX_MAX * fz_aa_vscale);
+	x1 = (int)fz_clamp(fx1, BBOX_MIN * fz_aa_hscale, BBOX_MAX * fz_aa_hscale);
+	y1 = (int)fz_clamp(fy1, BBOX_MIN * fz_aa_vscale, BBOX_MAX * fz_aa_vscale);
 
 	d = clip_lerp_y(gel->clip.y0, 0, x0, y0, x1, y1, &v);
 	if (d == OUTSIDE) return;
@@ -617,7 +628,7 @@ static inline void blit_aa(fz_pixmap *dst, int x, int y,
 	unsigned char *mp, int w, unsigned char *color)
 {
 	unsigned char *dp;
-	dp = dst->samples + ( (y - dst->y) * dst->w + (x - dst->x) ) * dst->n;
+	dp = dst->samples + (unsigned int)(( (y - dst->y) * dst->w + (x - dst->x) ) * dst->n);
 	if (color)
 		fz_paint_span_with_color(dp, mp, dst->n, w, color);
 	else
@@ -714,11 +725,11 @@ static inline void blit_sharp(int x0, int x1, int y,
 	fz_bbox clip, fz_pixmap *dst, unsigned char *color)
 {
 	unsigned char *dp;
-	x0 = CLAMP(x0, dst->x, dst->x + dst->w);
-	x1 = CLAMP(x1, dst->x, dst->x + dst->w);
+	x0 = fz_clampi(x0, dst->x, dst->x + dst->w);
+	x1 = fz_clampi(x1, dst->x, dst->x + dst->w);
 	if (x0 < x1)
 	{
-		dp = dst->samples + ( (y - dst->y) * dst->w + (x0 - dst->x) ) * dst->n;
+		dp = dst->samples + (unsigned int)(( (y - dst->y) * dst->w + (x0 - dst->x) ) * dst->n);
 		if (color)
 			fz_paint_solid_color(dp, dst->n, x1 - x0, color);
 		else
@@ -792,7 +803,7 @@ fz_scan_convert(fz_gel *gel, int eofill, fz_bbox clip,
 {
 	fz_aa_context *ctxaa = gel->ctx->aa;
 
-	if (fz_aa_level > 0)
+	if (fz_aa_bits > 0)
 		fz_scan_convert_aa(gel, eofill, clip, dst, color);
 	else
 		fz_scan_convert_sharp(gel, eofill, clip, dst, color);

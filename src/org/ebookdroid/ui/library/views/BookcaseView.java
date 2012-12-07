@@ -1,79 +1,121 @@
 package org.ebookdroid.ui.library.views;
 
 import org.ebookdroid.R;
-import org.ebookdroid.ui.library.IBrowserActivity;
 import org.ebookdroid.ui.library.adapters.BooksAdapter;
+import org.ebookdroid.ui.library.adapters.RecentAdapter;
 
+import android.content.Context;
 import android.database.DataSetObserver;
 import android.support.v4.view.ViewPager;
-import android.view.LayoutInflater;
-import android.widget.LinearLayout;
+import android.util.AttributeSet;
+import android.view.View;
+import android.widget.RelativeLayout;
 import android.widget.TextView;
 
-import org.emdev.utils.LayoutUtils;
+public class BookcaseView extends RelativeLayout {
 
-public class BookcaseView extends LinearLayout {
-
-    private final TextView shelfCaption;
-    private final BooksAdapter adapter;
-
+    private TextView shelfCaption;
     private ViewPager shelves;
+    private View prevShelf;
+    private View nextShelf;
+    private BooksAdapter adapter;
+    private RecentAdapter recents;
 
-    public BookcaseView(IBrowserActivity base, BooksAdapter adapter) {
-        super(base.getContext());
+    public BookcaseView(final Context context) {
+        super(context);
+    }
 
+    public BookcaseView(final Context context, final AttributeSet attrs) {
+        super(context, attrs);
+    }
+
+    public BookcaseView(final Context context, final AttributeSet attrs, final int defStyle) {
+        super(context, attrs, defStyle);
+    }
+
+    public void init(final BooksAdapter adapter, final RecentAdapter recents) {
         this.adapter = adapter;
-
-        setOrientation(VERTICAL);
-
-        LinearLayout ll = (LinearLayout) LayoutInflater.from(base.getContext()).inflate(R.layout.bookshelf_caption,
-                null);
-        addView(ll);
-
-        shelfCaption = (TextView) ll.findViewById(R.id.ShelfCaption);
-        shelves = new ViewPager(getContext());
+        this.recents = recents;
+        this.shelfCaption = (TextView) findViewById(R.id.ShelfCaption);
+        this.shelves = (ViewPager) findViewById(R.id.Shelves);
+        this.prevShelf = findViewById(R.id.ShelfLeftButton);
+        this.nextShelf = findViewById(R.id.ShelfRightButton);
 
         shelves.setAdapter(adapter);
-        LayoutUtils.fillInParent(this, shelves);
-        addView(shelves);
 
         adapter.registerDataSetObserver(new DataSetObserver() {
 
             @Override
             public void onChanged() {
-                super.onChanged();
-                shelfCaption.setText(BookcaseView.this.adapter.getListName(shelves.getCurrentItem()));
+                onBookAdapterChanged();
+            }
+        });
+
+        recents.registerDataSetObserver(new DataSetObserver() {
+
+            @Override
+            public void onChanged() {
+                onRecentAdapterChanged();
             }
         });
 
         shelves.setOnPageChangeListener(new ViewPager.SimpleOnPageChangeListener() {
 
-            public void onPageSelected(int arg0) {
-                shelfCaption.setText(BookcaseView.this.adapter.getListName(shelves.getCurrentItem()));
+            @Override
+            public void onPageSelected(final int shelf) {
+                updateShelfCaption(shelf);
             }
         });
+
+        onBookAdapterChanged();
     }
 
-    public void setCurrentList(Integer item) {
-        shelves.setCurrentItem(item);
+    protected void onBookAdapterChanged() {
+        final int selfCount = adapter.getCount();
+        int currentItem = shelves.getCurrentItem();
+        if (currentItem >= selfCount) {
+            currentItem = selfCount - 1;
+            setCurrentList(currentItem);
+            return;
+        }
+        if (currentItem == BooksAdapter.RECENT_INDEX) {
+            final int recentCount = adapter.getListCount(BooksAdapter.RECENT_INDEX);
+            if (recentCount == 0 && selfCount > BooksAdapter.SERVICE_SHELVES) {
+                setCurrentList(BooksAdapter.SERVICE_SHELVES);
+                return;
+            }
+        }
+        updateShelfCaption(currentItem);
+    }
+
+    protected void onRecentAdapterChanged() {
+        final int count = BookcaseView.this.adapter.getCount();
+        final int recentCount = recents.getCount();
+        if (recentCount == 0 && count > BooksAdapter.SERVICE_SHELVES) {
+            setCurrentList(BooksAdapter.SERVICE_SHELVES);
+        }
+    }
+
+    public int getCurrentList() {
+        return shelves.getCurrentItem();
+    }
+
+    public void setCurrentList(final int shelf) {
+        shelves.setCurrentItem(shelf);
+    }
+
+    public void updateShelfCaption(final int shelf) {
         shelfCaption.setText(BookcaseView.this.adapter.getListName(shelves.getCurrentItem()));
+        prevShelf.setVisibility(shelf == 0 ? View.GONE : View.VISIBLE);
+        nextShelf.setVisibility(shelf >= adapter.getCount() - 1 ? View.GONE : View.VISIBLE);
     }
 
     public void prevList() {
-        int shelf = shelves.getCurrentItem() - 1;
-        if (shelf < 0) {
-            shelf = 0;
-        }
-        shelves.setCurrentItem(shelf);
-        shelfCaption.setText(BookcaseView.this.adapter.getListName(shelves.getCurrentItem()));
+        setCurrentList(Math.max(0, shelves.getCurrentItem() - 1));
     }
 
     public void nextList() {
-        int shelf = shelves.getCurrentItem() + 1;
-        if (shelf > adapter.getListCount() - 1) {
-            shelf = adapter.getListCount() - 1;
-        }
-        shelves.setCurrentItem(shelf);
-        shelfCaption.setText(BookcaseView.this.adapter.getListName(shelves.getCurrentItem()));
+        setCurrentList(Math.min(shelves.getCurrentItem() + 1, adapter.getListCount() - 1));
     }
+
 }

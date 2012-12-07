@@ -1,10 +1,11 @@
 package org.ebookdroid;
 
-import org.ebookdroid.common.log.LogContext;
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
 
 public class EBookDroidLibraryLoader {
 
-    private static final LogContext LCTX = LogContext.ROOT.lctx("LibraryLoader");
+    private static final LogContext LCTX = LogManager.root().lctx("LibraryLoader");
 
     private static boolean alreadyLoaded = false;
 
@@ -14,10 +15,15 @@ public class EBookDroidLibraryLoader {
         if (alreadyLoaded) {
             return;
         }
-        System.loadLibrary("ebookdroid");
-        alreadyLoaded = true;
-        nativeGraphicsAvailable = isNativeGraphicsAvailable();
-        LCTX.i("Native graphics " + (nativeGraphicsAvailable ? "available" : "not available"));
+        try {
+            System.loadLibrary("ebookdroid");
+            alreadyLoaded = true;
+            nativeGraphicsAvailable = isNativeGraphicsAvailable();
+            LCTX.i("Native graphics " + (nativeGraphicsAvailable ? "available" : "not available"));
+        } catch (Throwable th) {
+            LCTX.e("Native library cannot be loaded: ", th);
+            throw new RuntimeException(th);
+        }
     }
 
     public static native void free();

@@ -1,34 +1,38 @@
 package org.ebookdroid.core;
 
-import org.ebookdroid.common.bitmaps.Bitmaps;
-import org.ebookdroid.common.log.LogContext;
-import org.ebookdroid.common.settings.SettingsManager;
+import org.ebookdroid.common.bitmaps.ByteBufferBitmap;
+import org.ebookdroid.common.bitmaps.ByteBufferManager;
+import org.ebookdroid.common.bitmaps.GLBitmaps;
 import org.ebookdroid.common.settings.books.BookSettings;
+import org.ebookdroid.common.settings.types.DocumentViewMode;
 import org.ebookdroid.common.settings.types.PageType;
 import org.ebookdroid.core.codec.CodecPageInfo;
 import org.ebookdroid.core.codec.PageLink;
+import org.ebookdroid.core.crop.PageCropper;
 import org.ebookdroid.ui.viewer.IActivityController;
 
 import android.graphics.Matrix;
+import android.graphics.PointF;
 import android.graphics.RectF;
 import android.util.FloatMath;
 
 import java.util.List;
 
-import org.emdev.utils.LengthUtils;
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
 import org.emdev.utils.MathUtils;
 import org.emdev.utils.MatrixUtils;
 
 public class Page {
 
-    static final LogContext LCTX = LogContext.ROOT.lctx("Page", false);
+    static final LogContext LCTX = LogManager.root().lctx("Page", false);
 
     public final PageIndex index;
     public final PageType type;
     public final CodecPageInfo cpi;
 
     final IActivityController base;
-    final PageTree nodes;
+    public final PageTree nodes;
 
     RectF bounds;
     int aspectRatio;
@@ -39,10 +43,6 @@ public class Page {
     int zoomLevel = 1;
 
     List<PageLink> links;
-
-    String pattern;
-    Integer currrentHighlight;
-    List<? extends RectF> highlights;
 
     public Page(final IActivityController base, final PageIndex index, final PageType pt, final CodecPageInfo cpi) {
         this.base = base;
@@ -56,46 +56,9 @@ public class Page {
         nodes = new PageTree(this);
     }
 
-    public void recycle(final List<Bitmaps> bitmapsToRecycle) {
+    public void recycle(final List<GLBitmaps> bitmapsToRecycle) {
         recycled = true;
         nodes.recycleAll(bitmapsToRecycle, true);
-    }
-
-    public boolean areHighlightsActual(String pattern) {
-        return this.pattern != null && this.pattern.equals(pattern);
-    }
-
-    public RectF getNextHighlight() {
-        if (currrentHighlight == null) {
-            currrentHighlight = Integer.valueOf(-1);
-        }
-        int index = currrentHighlight.intValue() + 1;
-        currrentHighlight = Integer.valueOf(index);
-        return 0 <= index && index < LengthUtils.length(highlights) ? highlights.get(index) : null;
-    }
-
-    public RectF getPrevHighlight() {
-        if (currrentHighlight == null) {
-            currrentHighlight = LengthUtils.length(highlights);
-        }
-        int index = currrentHighlight.intValue() - 1;
-        currrentHighlight = Integer.valueOf(index);
-        return 0 <= index && index < LengthUtils.length(highlights) ? highlights.get(index) : null;
-    }
-
-    public void setHighlights(String pattern, List<? extends RectF> regions) {
-        this.pattern = pattern;
-        this.highlights = regions;
-        this.currrentHighlight = null;
-    }
-
-    public void clearHighlights() {
-        this.pattern = null;
-        this.currrentHighlight = null;
-        if (highlights != null) {
-            highlights.clear();
-            highlights = null;
-        }
     }
 
     public float getAspectRatio() {
@@ -136,13 +99,46 @@ public class Page {
         }
     }
 
+    public boolean shouldCrop() {
+        final BookSettings bs = base.getBookSettings();
+        if (nodes.root.hasManualCropping()) {
+            return true;
+        }
+        return bs != null && bs.cropPages;
+    }
+
+    public RectF getCropping() {
+        return shouldCrop() ? nodes.root.getCropping() : null;
+    }
+
+    public RectF getCropping(PageTreeNode node) {
+        return shouldCrop() ? node.getCropping() : null;
+    }
+
+    protected void updateAspectRatio() {
+        final RectF cropping = getCropping();
+        if (cropping != null) {
+            final float pageWidth = cpi.width * cropping.width();
+            final float pageHeight = cpi.height * cropping.height();
+            setAspectRatio(pageWidth, pageHeight);
+        } else {
+            setAspectRatio(cpi);
+        }
+    }
+
     public RectF getBounds(final float zoom) {
-        // if (zoom != storedZoom) {
-        // storedZoom = zoom;
-        // zoomedBounds = MathUtils.zoom(bounds, zoom);
-        // }
-        // return zoomedBounds;
-        return MathUtils.zoom(bounds, zoom);
+        RectF bounds = new RectF();
+        getBounds(zoom, bounds);
+        return bounds;
+    }
+
+    public void getBounds(final float zoom, RectF target) {
+        MathUtils.zoom(bounds, zoom, target);
+
+        final BookSettings bs = base.getBookSettings();
+        if (bs != null && bs.viewMode == DocumentViewMode.SINGLE_PAGE && bounds.left > 0) {
+            target.offset((bounds.left + bounds.right)*(1 - zoom)/2, 0);
+        }
     }
 
     public float getTargetRectScale() {
@@ -187,9 +183,8 @@ public class Page {
     }
 
     public RectF getPageRegion(final RectF pageBounds, final RectF sourceRect) {
-        final BookSettings bs = SettingsManager.getBookSettings();
-        final RectF cb = nodes.root.croppedBounds;
-        if (bs != null && bs.cropPages && cb != null) {
+        final RectF cb = getCropping();
+        if (cb != null) {
             final Matrix m = MatrixUtils.get();
             final RectF psb = nodes.root.pageSliceBounds;
             m.postTranslate(psb.left - cb.left, psb.top - cb.top);
@@ -206,5 +201,16 @@ public class Page {
         }
 
         return getTargetRect(type, pageBounds, sourceRect);
+    }
+
+    protected RectF getColumn(final PointF pos) {
+        final DecodeService ds = base.getDecodeService();
+        final ByteBufferBitmap pageImage = ds.createPageThumbnail(PageCropper.BMP_SIZE, PageCropper.BMP_SIZE,
+                index.docIndex, type.getInitialRect());
+
+        final RectF column = PageCropper.getColumn(pageImage, pos.x, pos.y);
+        ByteBufferManager.release(pageImage);
+
+        return column;
     }
 }

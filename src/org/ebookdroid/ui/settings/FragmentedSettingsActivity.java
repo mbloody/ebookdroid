@@ -1,12 +1,10 @@
 package org.ebookdroid.ui.settings;
 
 import org.ebookdroid.R;
-import org.ebookdroid.common.settings.SettingsManager;
-import org.ebookdroid.ui.settings.fragments.BookFragment;
 
 import android.annotation.TargetApi;
+import android.content.res.Configuration;
 
-import java.util.Iterator;
 import java.util.List;
 
 @TargetApi(11)
@@ -19,15 +17,14 @@ public class FragmentedSettingsActivity extends SettingsActivity {
     @Override
     public void onBuildHeaders(final List<Header> target) {
         loadHeadersFromResource(R.xml.preferences_headers, target);
+    }
 
-        if (SettingsManager.getBookSettings() == null) {
-            for (Iterator<Header> i = target.iterator(); i.hasNext();) {
-                Header header = i.next();
-                if (BookFragment.class.getName().equals(header.fragment)) {
-                    i.remove();
-                    break;
-                }
-            }
+    @Override
+    public boolean onIsMultiPane() {
+        final Configuration c = this.getResources().getConfiguration();
+        if (0 != (Configuration.SCREENLAYOUT_SIZE_XLARGE & c.screenLayout)) {
+            return c.orientation == Configuration.ORIENTATION_LANDSCAPE;
         }
+        return false;
     }
 }

@@ -1,23 +1,17 @@
-#include "fitz.h"
-
-#ifdef __ANDROID__
-#define EXIT(code) do {} while(0)
-#else
-#define EXIT(code) exit(code)
-#endif
-
+#include "fitz-internal.h"
 
 /* Warning context */
 
 void fz_var_imp(void *var)
 {
-	var = var; /* Do nothing */
+	UNUSED(var); /* Do nothing */
 }
 
 void fz_flush_warnings(fz_context *ctx)
 {
 	if (ctx->warn->count > 1)
 	{
+		fprintf(stderr, "warning: ... repeated %d times ...\n", ctx->warn->count);
 		LOGE("warning: ... repeated %d times ...\n", ctx->warn->count);
 	}
 	ctx->warn->message[0] = 0;
@@ -40,6 +34,7 @@ void fz_warn(fz_context *ctx, char *fmt, ...)
 	else
 	{
 		fz_flush_warnings(ctx);
+		fprintf(stderr, "warning: %s\n", buf);
 		LOGE("warning: %s\n", buf);
 		fz_strlcpy(ctx->warn->message, buf, sizeof ctx->warn->message);
 		ctx->warn->count = 1;
@@ -51,22 +46,29 @@ void fz_warn(fz_context *ctx, char *fmt, ...)
 static void throw(fz_error_context *ex)
 {
 	if (ex->top >= 0) {
-		longjmp(ex->stack[ex->top].buffer, 1);
+		fz_longjmp(ex->stack[ex->top].buffer, 1);
 	} else {
+		fprintf(stderr, "uncaught exception: %s\n", ex->message);
 		LOGE("uncaught exception: %s\n", ex->message);
-		EXIT(EXIT_FAILURE);
+		exit(EXIT_FAILURE);
 	}
 }
 
-void fz_push_try(fz_error_context *ex)
+int fz_push_try(fz_error_context *ex)
 {
 	assert(ex);
-	if (ex->top + 1 >= nelem(ex->stack))
-	{
-    		LOGE("exception stack overflow: %d!\n", ex->top);
-		EXIT(EXIT_FAILURE);
-	}
 	ex->top++;
+	/* Normal case, get out of here quick */
+	if (ex->top < nelem(ex->stack)-1)
+		return 1;
+	/* We reserve the top slot on the exception stack purely to cope with
+	 * the case when we overflow. If we DO hit this, then we 'throw'
+	 * immediately - returning 0 stops the setjmp happening and takes us
+	 * direct to the always/catch clauses. */
+	assert(ex->top == nelem(ex->stack)-1);
+	strcpy(ex->message, "exception stack overflow!\n");
+	ex->stack[ex->top].code = 1;
+	return 0;
 }
 
 char *fz_caught(fz_context *ctx)
@@ -84,6 +86,7 @@ void fz_throw(fz_context *ctx, char *fmt, ...)
 	va_end(args);
 
 	fz_flush_warnings(ctx);
+	fprintf(stderr, "error: %s\n", ctx->error->message);
 	LOGE("error: %s\n", ctx->error->message);
 
 	throw(ctx->error);

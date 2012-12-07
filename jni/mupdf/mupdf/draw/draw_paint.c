@@ -1,4 +1,4 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 /*
 
@@ -382,8 +382,8 @@ fz_paint_pixmap_with_rect(fz_pixmap *dst, fz_pixmap *src, int alpha, fz_bbox bbo
 
 	assert(dst->n == src->n);
 
-	bbox = fz_intersect_bbox(bbox, fz_bound_pixmap(dst));
-	bbox = fz_intersect_bbox(bbox, fz_bound_pixmap(src));
+	bbox = fz_intersect_bbox(bbox, fz_pixmap_bbox_no_ctx(dst));
+	bbox = fz_intersect_bbox(bbox, fz_pixmap_bbox_no_ctx(src));
 
 	x = bbox.x0;
 	y = bbox.y0;
@@ -393,8 +393,8 @@ fz_paint_pixmap_with_rect(fz_pixmap *dst, fz_pixmap *src, int alpha, fz_bbox bbo
 		return;
 
 	n = src->n;
-	sp = src->samples + ((y - src->y) * src->w + (x - src->x)) * src->n;
-	dp = dst->samples + ((y - dst->y) * dst->w + (x - dst->x)) * dst->n;
+	sp = src->samples + (unsigned int)(((y - src->y) * src->w + (x - src->x)) * src->n);
+	dp = dst->samples + (unsigned int)(((y - dst->y) * dst->w + (x - dst->x)) * dst->n);
 
 	while (h--)
 	{
@@ -413,8 +413,8 @@ fz_paint_pixmap(fz_pixmap *dst, fz_pixmap *src, int alpha)
 
 	assert(dst->n == src->n);
 
-	bbox = fz_bound_pixmap(dst);
-	bbox = fz_intersect_bbox(bbox, fz_bound_pixmap(src));
+	bbox = fz_pixmap_bbox_no_ctx(dst);
+	bbox = fz_intersect_bbox(bbox, fz_pixmap_bbox_no_ctx(src));
 
 	x = bbox.x0;
 	y = bbox.y0;
@@ -424,8 +424,8 @@ fz_paint_pixmap(fz_pixmap *dst, fz_pixmap *src, int alpha)
 		return;
 
 	n = src->n;
-	sp = src->samples + ((y - src->y) * src->w + (x - src->x)) * src->n;
-	dp = dst->samples + ((y - dst->y) * dst->w + (x - dst->x)) * dst->n;
+	sp = src->samples + (unsigned int)(((y - src->y) * src->w + (x - src->x)) * src->n);
+	dp = dst->samples + (unsigned int)(((y - dst->y) * dst->w + (x - dst->x)) * dst->n);
 
 	while (h--)
 	{
@@ -445,9 +445,9 @@ fz_paint_pixmap_with_mask(fz_pixmap *dst, fz_pixmap *src, fz_pixmap *msk)
 	assert(dst->n == src->n);
 	assert(msk->n == 1);
 
-	bbox = fz_bound_pixmap(dst);
-	bbox = fz_intersect_bbox(bbox, fz_bound_pixmap(src));
-	bbox = fz_intersect_bbox(bbox, fz_bound_pixmap(msk));
+	bbox = fz_pixmap_bbox_no_ctx(dst);
+	bbox = fz_intersect_bbox(bbox, fz_pixmap_bbox_no_ctx(src));
+	bbox = fz_intersect_bbox(bbox, fz_pixmap_bbox_no_ctx(msk));
 
 	x = bbox.x0;
 	y = bbox.y0;
@@ -457,9 +457,9 @@ fz_paint_pixmap_with_mask(fz_pixmap *dst, fz_pixmap *src, fz_pixmap *msk)
 		return;
 
 	n = src->n;
-	sp = src->samples + ((y - src->y) * src->w + (x - src->x)) * src->n;
-	mp = msk->samples + ((y - msk->y) * msk->w + (x - msk->x)) * msk->n;
-	dp = dst->samples + ((y - dst->y) * dst->w + (x - dst->x)) * dst->n;
+	sp = src->samples + (unsigned int)(((y - src->y) * src->w + (x - src->x)) * src->n);
+	mp = msk->samples + (unsigned int)(((y - msk->y) * msk->w + (x - msk->x)) * msk->n);
+	dp = dst->samples + (unsigned int)(((y - dst->y) * dst->w + (x - dst->x)) * dst->n);
 
 	while (h--)
 	{

@@ -26,6 +26,13 @@ public class MathUtils {
         return new RectF(zoom * rect.left, zoom * rect.top, zoom * rect.right, zoom * rect.bottom);
     }
 
+    public static void zoom(final RectF rect, final float zoom, final RectF target) {
+        target.left = rect.left * zoom;
+        target.right = rect.right * zoom;
+        target.top = rect.top * zoom;
+        target.bottom = rect.bottom * zoom;
+    }
+
     public static RectF zoom(final Rect rect, final float zoom) {
         return new RectF(zoom * rect.left, zoom * rect.top, zoom * rect.right, zoom * rect.bottom);
     }
@@ -77,7 +84,7 @@ public class MathUtils {
         rect.bottom = FloatMath.floor(rect.bottom * share) / share;
         return rect;
     }
-    
+
     public static RectF floor(final RectF rect) {
         rect.left = FloatMath.floor(rect.left);
         rect.top = FloatMath.floor(rect.top);
@@ -85,7 +92,7 @@ public class MathUtils {
         rect.bottom = FloatMath.floor(rect.bottom);
         return rect;
     }
-    
+
     public static RectF ceil(final RectF rect) {
         rect.left = FloatMath.ceil(rect.left);
         rect.top = FloatMath.ceil(rect.top);
@@ -93,12 +100,36 @@ public class MathUtils {
         rect.bottom = FloatMath.ceil(rect.bottom);
         return rect;
     }
-    
+
     public static RectF round(final RectF rect) {
         rect.left = FloatMath.floor(rect.left);
         rect.top = FloatMath.floor(rect.top);
         rect.right = FloatMath.ceil(rect.right);
         rect.bottom = FloatMath.ceil(rect.bottom);
         return rect;
+    }
+
+    public static int nextPowerOf2(int n) {
+        if (n <= 0 || n > (1 << 30)) {
+            throw new IllegalArgumentException();
+        }
+        n -= 1;
+        n |= n >> 16;
+        n |= n >> 8;
+        n |= n >> 4;
+        n |= n >> 2;
+        n |= n >> 1;
+        return n + 1;
+    }
+
+    public static int prevPowerOf2(final int n) {
+        if (n <= 0) {
+            throw new IllegalArgumentException();
+        }
+        return Integer.highestOneBit(n);
+    }
+
+    public static boolean isOpaque(final int color) {
+        return color >>> 24 == 0xFF;
     }
 }

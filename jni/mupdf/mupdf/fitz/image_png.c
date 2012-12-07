@@ -1,11 +1,11 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 #include <zlib.h>
 
 struct info
 {
 	fz_context *ctx;
-	int width, height, depth, n;
+	unsigned int width, height, depth, n;
 	int interlace, indexed;
 	int size;
 	unsigned char *samples;
@@ -15,7 +15,7 @@ struct info
 	int xres, yres;
 };
 
-static inline int getint(unsigned char *p)
+static inline unsigned int getuint(unsigned char *p)
 {
 	return p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
 }
@@ -88,8 +88,8 @@ png_predict(unsigned char *samples, int width, int height, int n, int depth)
 
 	for (row = 0; row < height; row ++)
 	{
-		unsigned char *src = samples + (stride + 1) * row;
-		unsigned char *dst = samples + stride * row;
+		unsigned char *src = samples + (unsigned int)((stride + 1) * row);
+		unsigned char *dst = samples + (unsigned int)(stride * row);
 
 		unsigned char *a = dst;
 		unsigned char *b = dst - stride;
@@ -192,7 +192,7 @@ png_deinterlace(struct info *info, int *passw, int *passh, int *passofs)
 
 	for (p = 0; p < 7; p++)
 	{
-		unsigned char *sp = info->samples + passofs[p];
+		unsigned char *sp = info->samples + (unsigned int)(passofs[p]);
 		int w = passw[p];
 		int h = passh[p];
 
@@ -226,8 +226,8 @@ png_read_ihdr(struct info *info, unsigned char *p, int size)
 	if (size != 13)
 		fz_throw(info->ctx, "IHDR chunk is the wrong size");
 
-	info->width = getint(p + 0);
-	info->height = getint(p + 4);
+	info->width = getuint(p + 0);
+	info->height = getuint(p + 4);
 	info->depth = p[8];
 
 	color = p[9];
@@ -283,14 +283,25 @@ png_read_plte(struct info *info, unsigned char *p, int size)
 	int n = size / 3;
 	int i;
 
-	if (n > 256 || n > (1 << info->depth))
-		fz_throw(info->ctx, "too many samples in palette");
+	if (n > 256)
+	{
+		fz_warn(info->ctx, "too many samples in palette");
+		n = 256;
+	}
 
 	for (i = 0; i < n; i++)
 	{
 		info->palette[i * 4] = p[i * 3];
 		info->palette[i * 4 + 1] = p[i * 3 + 1];
 		info->palette[i * 4 + 2] = p[i * 3 + 2];
+	}
+
+	/* Fill in any missing palette entries */
+	for (; i < 256; i++)
+	{
+		info->palette[i * 4] = 0;
+		info->palette[i * 4 + 1] = 0;
+		info->palette[i * 4 + 2] = 0;
 	}
 }
 
@@ -303,10 +314,16 @@ png_read_trns(struct info *info, unsigned char *p, int size)
 
 	if (info->indexed)
 	{
-		if (size > 256 || size > (1 << info->depth))
-			fz_throw(info->ctx, "too many samples in transparency table");
+		if (size > 256)
+		{
+			fz_warn(info->ctx, "too many samples in transparency table");
+			size = 256;
+		}
 		for (i = 0; i < size; i++)
 			info->palette[i * 4 + 3] = p[i];
+		/* Fill in any missing entries */
+		for (; i < 256; i++)
+			info->palette[i * 4 + 3] = 255;
 	}
 	else
 	{
@@ -343,8 +360,8 @@ png_read_phys(struct info *info, unsigned char *p, int size)
 		fz_throw(info->ctx, "pHYs chunk is the wrong size");
 	if (p[8] == 1)
 	{
-		info->xres = getint(p) * 254 / 10000;
-		info->yres = getint(p + 4) * 254 / 10000;
+		info->xres = getuint(p) * 254 / 10000;
+		info->yres = getuint(p + 4) * 254 / 10000;
 	}
 }
 
@@ -352,7 +369,7 @@ static void
 png_read_image(fz_context *ctx, struct info *info, unsigned char *p, int total)
 {
 	int passw[7], passh[7], passofs[8];
-	int code, size;
+	unsigned int code, size;
 	z_stream stm;
 
 	memset(info, 0, sizeof (struct info));
@@ -371,7 +388,7 @@ png_read_image(fz_context *ctx, struct info *info, unsigned char *p, int total)
 
 	/* Read IHDR chunk (must come first) */
 
-	size = getint(p);
+	size = getuint(p);
 
 	if (size + 12 > total)
 		fz_throw(info->ctx, "premature end of data in png image");
@@ -417,7 +434,7 @@ png_read_image(fz_context *ctx, struct info *info, unsigned char *p, int total)
 		/* Read remaining chunks until IEND */
 		while (total > 8)
 		{
-			size = getint(p);
+			size = getuint(p);
 
 			if (size + 12 > total)
 				fz_throw(info->ctx, "premature end of data in png image");
@@ -504,8 +521,8 @@ png_mask_transparency(struct info *info, fz_pixmap *dst)
 
 	for (y = 0; y < info->height; y++)
 	{
-		unsigned char *sp = info->samples + y * stride;
-		unsigned char *dp = dst->samples + y * dst->w * dst->n;
+		unsigned char *sp = info->samples + (unsigned int)(y * stride);
+		unsigned char *dp = dst->samples + (unsigned int)(y * dst->w * dst->n);
 		for (x = 0; x < info->width; x++)
 		{
 			t = 1;
@@ -556,7 +573,7 @@ fz_load_png(fz_context *ctx, unsigned char *p, int total)
 		png_mask_transparency(&png, image);
 
 	if (png.transparency || png.n == 2 || png.n == 4)
-		fz_premultiply_pixmap(image);
+		fz_premultiply_pixmap(png.ctx, image);
 
 	fz_free(png.ctx, png.samples);
 

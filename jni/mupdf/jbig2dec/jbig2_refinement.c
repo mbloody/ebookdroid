@@ -1,20 +1,22 @@
+/* Copyright (C) 2001-2012 Artifex Software, Inc.
+   All Rights Reserved.
+
+   This software is provided AS-IS with no warranty, either express or
+   implied.
+
+   This software is distributed under license and may not be copied,
+   modified or distributed except as expressly authorized under the terms
+   of the license contained in the file LICENSE in this distribution.
+
+   Refer to licensing information at http://www.artifex.com or contact
+   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
+   CA  94903, U.S.A., +1(415)492-9861, for further information.
+*/
+
 /*
     jbig2dec
-
-    Copyright (C) 2004 Artifex Software, Inc.
-
-    This software is provided AS-IS with no warranty,
-    either express or implied.
-
-    This software is distributed under license and may not
-    be copied, modified or distributed except as expressly
-    authorized under the terms of the license contained in
-    the file LICENSE in this distribution.
-
-    For further licensing information refer to http://artifex.com/ or
-    contact Artifex Software, Inc., 7 Mt. Lassen Drive - Suite A-134,
-    San Rafael, CA  94903, U.S.A., +1(415)492-9861.
 */
+
 
 /**
  * Generic Refinement region handlers.
@@ -235,6 +237,116 @@ jbig2_decode_refinement_template1(Jbig2Ctx *ctx,
 }
 
 
+typedef uint32_t (*ContextBuilder)(const Jbig2RefinementRegionParams *,
+Jbig2Image *, int, int);
+
+static int implicit_value( const Jbig2RefinementRegionParams *params, Jbig2Image
+*image, int x, int y )
+{
+  Jbig2Image *ref = params->reference;
+  int i = x - params->DX;
+  int j = y - params->DY;
+  int m = jbig2_image_get_pixel(ref, i, j);
+  return (
+          (jbig2_image_get_pixel(ref, i - 1, j - 1) == m) &&
+          (jbig2_image_get_pixel(ref, i    , j - 1) == m) &&
+          (jbig2_image_get_pixel(ref, i + 1, j - 1) == m) &&
+          (jbig2_image_get_pixel(ref, i - 1, j    ) == m) &&
+          (jbig2_image_get_pixel(ref, i + 1, j    ) == m) &&
+          (jbig2_image_get_pixel(ref, i - 1, j + 1) == m) &&
+          (jbig2_image_get_pixel(ref, i    , j + 1) == m) &&
+          (jbig2_image_get_pixel(ref, i + 1, j + 1) == m)
+         )? m : -1;
+}
+
+static uint32_t mkctx0( const Jbig2RefinementRegionParams *params, Jbig2Image
+*image, int x, int y )
+{
+  const int dx = params->DX;
+  const int dy = params->DY;
+  Jbig2Image *ref = params->reference;
+  uint32_t CONTEXT;
+  CONTEXT  = jbig2_image_get_pixel(image, x - 1, y + 0);
+  CONTEXT |= jbig2_image_get_pixel(image, x + 1, y - 1) << 1;
+  CONTEXT |= jbig2_image_get_pixel(image, x + 0, y - 1) << 2;
+  CONTEXT |= jbig2_image_get_pixel(image, x + params->grat[0], y +
+params->grat[1]) << 3;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + 1, y - dy + 1) << 4;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + 0, y - dy + 1) << 5;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx - 1, y - dy + 1) << 6;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + 1, y - dy + 0) << 7;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + 0, y - dy + 0) << 8;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx - 1, y - dy + 0) << 9;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + 1, y - dy - 1) << 10;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + 0, y - dy - 1) << 11;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + params->grat[2], y - dy +
+params->grat[3]) << 12;
+  return CONTEXT;
+}
+
+static uint32_t mkctx1( const Jbig2RefinementRegionParams *params, Jbig2Image
+*image, int x, int y )
+{
+  const int dx = params->DX;
+  const int dy = params->DY;
+  Jbig2Image *ref = params->reference;
+  uint32_t CONTEXT;
+  CONTEXT  = jbig2_image_get_pixel(image, x - 1, y + 0);
+  CONTEXT |= jbig2_image_get_pixel(image, x + 1, y - 1) << 1;
+  CONTEXT |= jbig2_image_get_pixel(image, x + 0, y - 1) << 2;
+  CONTEXT |= jbig2_image_get_pixel(image, x - 1, y - 1) << 3;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + 1, y - dy + 1) << 4;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + 0, y - dy + 1) << 5;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + 1, y - dy + 0) << 6;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + 0, y - dy + 0) << 7;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx - 1, y - dy + 0) << 8;
+  CONTEXT |= jbig2_image_get_pixel(ref, x - dx + 0, y - dy - 1) << 9;
+  return CONTEXT;
+}
+
+static int jbig2_decode_refinement_TPGRON(const Jbig2RefinementRegionParams
+*params, Jbig2ArithState *as, Jbig2Image *image, Jbig2ArithCx *GR_stats)
+{
+  const int GRW = image->width;
+  const int GRH = image->height;
+  int x, y, iv, bit, LTP = 0;
+  uint32_t start_context = (params->GRTEMPLATE? 0x40   : 0x100);
+  ContextBuilder mkctx   = (params->GRTEMPLATE? mkctx1 : mkctx0);
+
+  for (y = 0; y < GRH; y++)
+  {
+    bit = jbig2_arith_decode(as, &GR_stats[start_context]);
+    if (bit < 0) return -1;
+    LTP = LTP ^ bit;
+    if (!LTP)
+    {
+      for (x = 0; x < GRW; x++)
+      {
+        bit = jbig2_arith_decode(as, &GR_stats[mkctx(params, image, x, y)]);
+        if (bit < 0) return -1;
+        jbig2_image_set_pixel(image, x, y, bit);
+      }
+    }
+    else
+    {
+      for (x = 0; x < GRW; x++)
+      {
+        iv = implicit_value(params, image, x, y);
+        if (iv < 0)
+        {
+          bit = jbig2_arith_decode(as, &GR_stats[mkctx(params, image, x, y)]);
+          if (bit < 0) return -1;
+          jbig2_image_set_pixel(image, x, y, bit);
+        }
+        else jbig2_image_set_pixel(image, x, y, iv);
+      }
+    }
+  }
+
+  return 0;
+}
+
+
 /**
  * jbig2_decode_refinement_region: Decode a generic refinement region.
  * @ctx: The context for allocation and error reporting.
@@ -262,14 +374,13 @@ jbig2_decode_refinement_region(Jbig2Ctx *ctx,
 {
   {
     jbig2_error(ctx, JBIG2_SEVERITY_DEBUG, segment->number,
-      "decoding generic refinement region with offset %d,%x,\n"
-      "  GRTEMPLATE=%d, TPGRON=%d, RA1=(%d,%d) RA2=(%d,%d)\n",
-      params->DX, params->DY, params->GRTEMPLATE, params->TPGRON,
-      params->grat[0], params->grat[1], params->grat[2], params->grat[3]);
+      "decoding generic refinement region with offset %d,%x, GRTEMPLATE=%d, TPGRON=%d",
+      params->DX, params->DY, params->GRTEMPLATE, params->TPGRON);
   }
+
   if (params->TPGRON)
-    return jbig2_error(ctx, JBIG2_SEVERITY_WARNING, segment->number,
-        "decode_refinement_region: typical prediction coding NYI");
+    return jbig2_decode_refinement_TPGRON(params, as, image, GR_stats);
+
   if (params->GRTEMPLATE)
     return jbig2_decode_refinement_template1_unopt(ctx, segment, params,
                                              as, image, GR_stats);
@@ -324,6 +435,7 @@ jbig2_refinement_region(Jbig2Ctx *ctx, Jbig2Segment *segment,
   Jbig2RegionSegmentInfo rsi;
   int offset = 0;
   byte seg_flags;
+  int code = 0;
 
   /* 7.4.7 */
   if (segment->data_length < 18)
@@ -398,12 +510,14 @@ jbig2_refinement_region(Jbig2Ctx *ctx, Jbig2Segment *segment,
     Jbig2ArithCx *GR_stats = NULL;
     int stats_size;
     Jbig2Image *image = NULL;
-    int code;
 
     image = jbig2_image_new(ctx, rsi.width, rsi.height);
     if (image == NULL)
-      return jbig2_error(ctx, JBIG2_SEVERITY_FATAL, segment->number,
-               "unable to allocate refinement image");
+    {
+        code = jbig2_error(ctx, JBIG2_SEVERITY_FATAL, segment->number,
+            "unable to allocate refinement image");
+        goto cleanup;
+    }
     jbig2_error(ctx, JBIG2_SEVERITY_DEBUG, segment->number,
       "allocated %d x %d image buffer for region decode results",
           rsi.width, rsi.height);
@@ -412,7 +526,7 @@ jbig2_refinement_region(Jbig2Ctx *ctx, Jbig2Segment *segment,
     GR_stats = jbig2_new(ctx, Jbig2ArithCx, stats_size);
     if (GR_stats == NULL)
     {
-        jbig2_error(ctx, JBIG2_SEVERITY_FATAL, -1,
+        code = jbig2_error(ctx, JBIG2_SEVERITY_FATAL, -1,
             "failed to allocate GR-stats in jbig2_refinement_region");
         goto cleanup;
     }
@@ -422,7 +536,7 @@ jbig2_refinement_region(Jbig2Ctx *ctx, Jbig2Segment *segment,
            segment->data_length - offset);
     if (ws == NULL)
     {
-        jbig2_error(ctx, JBIG2_SEVERITY_FATAL, -1,
+        code = jbig2_error(ctx, JBIG2_SEVERITY_FATAL, -1,
             "failed to allocate ws in jbig2_refinement_region");
         goto cleanup;
     }
@@ -430,7 +544,7 @@ jbig2_refinement_region(Jbig2Ctx *ctx, Jbig2Segment *segment,
     as = jbig2_arith_new(ctx, ws);
     if (as == NULL)
     {
-        jbig2_error(ctx, JBIG2_SEVERITY_FATAL, -1,
+        code = jbig2_error(ctx, JBIG2_SEVERITY_FATAL, -1,
             "failed to allocate as in jbig2_refinement_region");
         goto cleanup;
     }
@@ -440,7 +554,7 @@ jbig2_refinement_region(Jbig2Ctx *ctx, Jbig2Segment *segment,
 
     if ((segment->flags & 63) == 40) {
         /* intermediate region. save the result for later */
-	segment->result = image;
+        segment->result = jbig2_image_clone(ctx, image);
     } else {
 	/* immediate region. composite onto the page */
         jbig2_error(ctx, JBIG2_SEVERITY_DEBUG, segment->number,
@@ -448,14 +562,15 @@ jbig2_refinement_region(Jbig2Ctx *ctx, Jbig2Segment *segment,
             rsi.width, rsi.height, rsi.x, rsi.y);
 	jbig2_page_add_result(ctx, &ctx->pages[ctx->current_page],
           image, rsi.x, rsi.y, rsi.op);
-        jbig2_image_release(ctx, image);
     }
 
 cleanup:
+    jbig2_image_release(ctx, image);
+    jbig2_image_release(ctx, params.reference);
     jbig2_free(ctx->allocator, as);
     jbig2_word_stream_buf_free(ctx, ws);
     jbig2_free(ctx->allocator, GR_stats);
   }
 
-  return 0;
+  return code;
 }

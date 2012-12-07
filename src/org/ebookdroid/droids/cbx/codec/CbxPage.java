@@ -1,18 +1,13 @@
 package org.ebookdroid.droids.cbx.codec;
 
-import org.ebookdroid.common.bitmaps.BitmapManager;
-import org.ebookdroid.common.bitmaps.BitmapRef;
-import org.ebookdroid.common.bitmaps.RawBitmap;
-import org.ebookdroid.core.codec.CodecPage;
+import org.ebookdroid.common.bitmaps.ByteBufferBitmap;
+import org.ebookdroid.core.ViewState;
+import org.ebookdroid.core.codec.AbstractCodecPage;
 import org.ebookdroid.core.codec.CodecPageInfo;
-import org.ebookdroid.core.codec.PageLink;
-import org.ebookdroid.core.codec.PageTextBox;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.BitmapFactory.Options;
-import android.graphics.Canvas;
-import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.util.FloatMath;
@@ -20,14 +15,10 @@ import android.util.FloatMath;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Collections;
-import java.util.List;
 
-import org.emdev.utils.archives.ArchiveEntry;
+import org.emdev.common.archives.ArchiveEntry;
 
-public class CbxPage<ArchiveEntryType extends ArchiveEntry> implements CodecPage {
-
-    private static final Paint PAINT = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+public class CbxPage<ArchiveEntryType extends ArchiveEntry> extends AbstractCodecPage {
 
     private final ArchiveEntryType entry;
 
@@ -57,7 +48,7 @@ public class CbxPage<ArchiveEntryType extends ArchiveEntry> implements CodecPage
                 opts.inJustDecodeBounds = onlyBounds;
                 opts.inSampleSize = scale;
 
-                final Bitmap bitmap = BitmapFactory.decodeStream(new BufferedInputStream(is), null, opts);
+                final Bitmap bitmap = BitmapFactory.decodeStream(new BufferedInputStream(is, 64 * 1024), null, opts);
                 pageInfo = new CodecPageInfo();
                 if (onlyBounds) {
                     pageInfo.height = (opts.outHeight * scale);
@@ -65,6 +56,9 @@ public class CbxPage<ArchiveEntryType extends ArchiveEntry> implements CodecPage
                 } else {
                     pageInfo.height = (bitmap.getHeight() * scale);
                     pageInfo.width = (bitmap.getWidth() * scale);
+                }
+                if (CbxDocument.LCTX.isDebugEnabled()) {
+                    CbxDocument.LCTX.d("Bitmap decoded: " + pageInfo.width + ", " + pageInfo.height + ", " + scale);
                 }
                 return bitmap;
             } finally {
@@ -104,27 +98,13 @@ public class CbxPage<ArchiveEntryType extends ArchiveEntry> implements CodecPage
     }
 
     @Override
-    public List<PageLink> getPageLinks() {
-        return Collections.emptyList();
-    }
-
-    @Override
-    public List<PageTextBox> getPageText() {
-        return Collections.emptyList();
-    }
-
-    @Override
-    public List<? extends RectF> searchText(String pattern) {
-        return Collections.emptyList();
-    }
-
-    @Override
     public boolean isRecycled() {
         return false;
     }
 
     @Override
-    public BitmapRef renderBitmap(final int width, final int height, final RectF pageSliceBounds) {
+    public ByteBufferBitmap renderBitmap(final ViewState viewState, final int width, final int height,
+            final RectF pageSliceBounds) {
         if (getPageInfo() == null) {
             return null;
         }
@@ -150,15 +130,14 @@ public class CbxPage<ArchiveEntryType extends ArchiveEntry> implements CodecPage
             return null;
         }
 
-        final BitmapRef bmp = BitmapManager.getBitmap("CBX page", width, height, Bitmap.Config.RGB_565);
-
-        final Canvas c = new Canvas(bmp.getBitmap());
-
         final Rect srcRect = new Rect((int) (pageSliceBounds.left * storedBitmap.getWidth()),
-                (int) (pageSliceBounds.top * storedBitmap.getHeight()),
-                (int)FloatMath.ceil(pageSliceBounds.right * storedBitmap.getWidth()),
-                (int)FloatMath.ceil(pageSliceBounds.bottom * storedBitmap.getHeight()));
+                (int) (pageSliceBounds.top * storedBitmap.getHeight()), (int) FloatMath.ceil(pageSliceBounds.right
+                        * storedBitmap.getWidth()), (int) FloatMath.ceil(pageSliceBounds.bottom
+                        * storedBitmap.getHeight()));
 
+        if (CbxDocument.LCTX.isDebugEnabled()) {
+            CbxDocument.LCTX.d("bitmap="+storedBitmap.getWidth()+", "+storedBitmap.getHeight()+", src rect=" + (srcRect));
+        }
         if (CbxDocument.LCTX.isDebugEnabled()) {
             CbxDocument.LCTX.d("source ratio=" + (srcRect.width() / (float) srcRect.height()) + ", target ratio="
                     + (width / (float) height));
@@ -173,30 +152,20 @@ public class CbxPage<ArchiveEntryType extends ArchiveEntry> implements CodecPage
             if (CbxDocument.LCTX.isDebugEnabled()) {
                 CbxDocument.LCTX.d("Calling Native HQ4x");
             }
-            final RawBitmap src = new RawBitmap(storedBitmap, srcRect);
-            final BitmapRef scaled = src.scaleHq4x();
-            c.drawBitmap(scaled.getBitmap(), null, new Rect(0, 0, width, height), PAINT);
-            BitmapManager.release(scaled);
+            return ByteBufferBitmap.scaleHq4x(storedBitmap, srcRect);
         } else if (scaleFactor > 3.5) {
             if (CbxDocument.LCTX.isDebugEnabled()) {
                 CbxDocument.LCTX.d("Calling Native HQ3x");
             }
-            final RawBitmap src = new RawBitmap(storedBitmap, srcRect);
-            final BitmapRef scaled = src.scaleHq3x();
-            c.drawBitmap(scaled.getBitmap(), null, new Rect(0, 0, width, height), PAINT);
-            BitmapManager.release(scaled);
+            return ByteBufferBitmap.scaleHq3x(storedBitmap, srcRect);
         } else if (scaleFactor > 2.5) {
             if (CbxDocument.LCTX.isDebugEnabled()) {
                 CbxDocument.LCTX.d("Calling Native HQ2x");
             }
-            final RawBitmap src = new RawBitmap(storedBitmap, srcRect);
-            final BitmapRef scaled = src.scaleHq2x();
-            c.drawBitmap(scaled.getBitmap(), null, new Rect(0, 0, width, height), PAINT);
-            BitmapManager.release(scaled);
-        } else {
-            c.drawBitmap(storedBitmap, srcRect, new Rect(0, 0, width, height), PAINT);
+            return ByteBufferBitmap.scaleHq2x(storedBitmap, srcRect);
         }
-        return bmp;
+
+        return ByteBufferBitmap.get(storedBitmap, srcRect);
     }
 
     private int getScale(final float requiredWidth, final float requiredHeight) {

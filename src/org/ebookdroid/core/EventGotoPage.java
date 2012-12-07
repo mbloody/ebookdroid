@@ -1,27 +1,29 @@
 package org.ebookdroid.core;
 
-import org.ebookdroid.common.log.LogContext;
 import org.ebookdroid.core.models.DocumentModel;
 import org.ebookdroid.ui.viewer.IView;
 
 import android.graphics.PointF;
 import android.graphics.RectF;
 
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
+
 public class EventGotoPage implements IEvent {
 
-    public static final LogContext LCTX = LogContext.ROOT.lctx("EventGotoPage");
+    public static final LogContext LCTX = LogManager.root().lctx("EventGotoPage");
 
     protected final boolean centerPage;
 
     protected AbstractViewController ctrl;
-    protected ViewState viewState;
+    protected final ViewState viewState;
     protected DocumentModel model;
     protected int viewIndex;
     protected final float offsetX;
     protected final float offsetY;
 
     public EventGotoPage(final AbstractViewController ctrl, final int viewIndex) {
-        this.viewState = new ViewState(ctrl);
+        this.viewState = ViewState.get(ctrl);
         this.ctrl = ctrl;
         this.model = viewState.model;
         this.centerPage = true;
@@ -32,7 +34,7 @@ public class EventGotoPage implements IEvent {
 
     public EventGotoPage(final AbstractViewController ctrl, final int viewIndex, final float offsetX,
             final float offsetY) {
-        this.viewState = new ViewState(ctrl);
+        this.viewState = ViewState.get(ctrl);
         this.ctrl = ctrl;
         this.model = viewState.model;
         this.centerPage = false;
@@ -76,8 +78,10 @@ public class EventGotoPage implements IEvent {
 
         if (isScrollRequired(left, top, scrollX, scrollY)) {
             view.scrollTo(left, top);
-            return new ViewState(ctrl);
+            viewState.update();
+            return viewState;
         }
+        viewState.release();
 
         return EventPool.newEventScrollTo(ctrl, viewIndex).process();
     }

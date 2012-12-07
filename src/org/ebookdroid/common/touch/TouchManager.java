@@ -1,9 +1,7 @@
 package org.ebookdroid.common.touch;
 
 import org.ebookdroid.R;
-import org.ebookdroid.common.log.LogContext;
 import org.ebookdroid.common.settings.AppSettings;
-import org.ebookdroid.common.settings.SettingsManager;
 
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -16,6 +14,8 @@ import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
 
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
 import org.emdev.ui.actions.ActionEx;
 import org.emdev.utils.LengthUtils;
 import org.json.JSONArray;
@@ -24,7 +24,7 @@ import org.json.JSONObject;
 
 public class TouchManager {
 
-    private static final LogContext LCTX = LogContext.ROOT.lctx("Actions");
+    private static final LogContext LCTX = LogManager.root().lctx("Actions");
 
     public static final String DEFAULT_PROFILE = "DocumentView.Default";
 
@@ -81,7 +81,7 @@ public class TouchManager {
     public static void persist() {
         try {
             final JSONObject json = toJSON();
-            SettingsManager.updateTapProfiles(json.toString());
+            AppSettings.updateTapProfiles(json.toString());
         } catch (final JSONException ex) {
             ex.printStackTrace();
         }
@@ -117,7 +117,7 @@ public class TouchManager {
 
     public static Integer getAction(final Touch type, final float x, final float y, final float width,
             final float height) {
-        return SettingsManager.getAppSettings().tapsEnabled ? stack.peek().getAction(type, x, y, width, height) : null;
+        return AppSettings.current().tapsEnabled ? stack.peek().getAction(type, x, y, width, height) : null;
     }
 
     public static TouchProfile addProfile(final String name) {
@@ -180,8 +180,8 @@ public class TouchManager {
             this.name = name;
         }
 
-        public ListIterator<Region> regions() {
-            return regions.listIterator();
+        public ListIterator<Region> regions(boolean forward) {
+            return forward ? regions.listIterator() : regions.listIterator(regions.size());
         }
 
         public void clear() {

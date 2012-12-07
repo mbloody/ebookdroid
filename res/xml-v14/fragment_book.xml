@@ -1,16 +1,39 @@
 
-<PreferenceScreen 
+<PreferenceScreen
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:ebookdroid="http://ebookdroid.org" 
+    xmlns:ebookdroid="http://ebookdroid.org"
 	android:key="book_prefs"
 	android:summary="@string/pref_book_category_summary"
 	android:title="@string/pref_book_category">
+
+    <EditTextPreference
+            android:maxLength="4"
+            android:numeric="integer"
+            android:defaultValue="@string/pref_book_firstpageoffset_defvalue"
+            android:key="@string/pref_book_firstpageoffset_id"
+            android:summary="@string/pref_firstpageoffset_summary"
+            android:title="@string/pref_firstpageoffset_title" />
+
+    <ListPreference
+            android:defaultValue="@string/pref_rotation_unspecified"
+            android:entries="@array/pref_book_rotation_entries"
+            android:entryValues="@array/pref_book_rotation_values"
+            android:key="@string/pref_book_rotation_id"
+            android:summary="@string/pref_rotation_summary"
+            android:title="@string/pref_rotation_title" />
 
     <org.emdev.ui.preference.SwitchPreferenceEx
             android:defaultValue="@string/pref_splitpages_defvalue"
             android:key="@string/pref_book_splitpages_id"
             android:summary="@string/pref_splitpages_summary"
             android:title="@string/pref_splitpages_title" />
+
+    <org.emdev.ui.preference.SwitchPreferenceEx
+            android:defaultValue="@string/pref_splitpages_rtl_defvalue"
+            android:dependency="@string/pref_book_splitpages_id"
+            android:key="@string/pref_book_splitpages_rtl_id"
+            android:summary="@string/pref_splitpages_rtl_summary"
+            android:title="@string/pref_splitpages_rtl_title" />
 
     <org.emdev.ui.preference.SwitchPreferenceEx
             android:defaultValue="@string/pref_croppages_defvalue"
@@ -46,7 +69,7 @@
                 android:summary="@string/pref_animationtype_summary"
                 android:title="@string/pref_animationtype_title" />
 	</PreferenceCategory>
-	
+
     <PreferenceCategory
         android:summary="@string/pref_postprocessing_summary"
         android:title="@string/pref_postprocessing_category" >
@@ -57,6 +80,12 @@
             android:summary="@string/pref_nightmode_summary"
             android:title="@string/pref_nightmode_title" />
 
+        <org.emdev.ui.preference.SwitchPreferenceEx
+            android:defaultValue="@string/pref_posimages_in_nightmode_defvalue"
+            android:key="@string/pref_book_posimages_in_nightmode_id"
+            android:summary="@string/pref_posimages_in_nightmode_summary"
+            android:title="@string/pref_posimages_in_nightmode_title" />
+
         <org.emdev.ui.preference.SeekBarPreference
             android:defaultValue="@string/pref_contrast_defvalue"
             android:key="@string/pref_book_contrast_id"
@@ -64,6 +93,14 @@
             ebookdroid:maxValue="@string/pref_contrast_maxvalue"
             android:summary="@string/pref_contrast_summary"
             android:title="@string/pref_contrast_title" />
+
+        <org.emdev.ui.preference.SeekBarPreference
+            android:defaultValue="@string/pref_gamma_defvalue"
+            android:key="@string/pref_book_gamma_id"
+            ebookdroid:minValue="@string/pref_gamma_minvalue"
+            ebookdroid:maxValue="@string/pref_gamma_maxvalue"
+            android:summary="@string/pref_gamma_summary"
+            android:title="@string/pref_gamma_title" />
 
         <org.emdev.ui.preference.SeekBarPreference
             android:defaultValue="@string/pref_exposure_defvalue"
@@ -81,5 +118,5 @@
 
     </PreferenceCategory>
 
-	
+
 </PreferenceScreen>

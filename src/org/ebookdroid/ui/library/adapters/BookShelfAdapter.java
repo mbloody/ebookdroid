@@ -14,6 +14,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 
 import org.emdev.ui.adapters.BaseViewHolder;
+import org.emdev.utils.FileUtils;
 import org.emdev.utils.StringUtils;
 
 public class BookShelfAdapter extends BaseAdapter {
@@ -21,17 +22,20 @@ public class BookShelfAdapter extends BaseAdapter {
     private final IBrowserActivity base;
     private final IdentityHashMap<DataSetObserver, DataSetObserver> observers = new IdentityHashMap<DataSetObserver, DataSetObserver>();
 
-    final int id;
-    final String name;
-    final String path;
+    public final int id;
+    public final String name;
+    public final String path;
+    public final String mpath;
 
     final List<BookNode> nodes = new ArrayList<BookNode>();
+    public boolean measuring = false;
 
     public BookShelfAdapter(final IBrowserActivity base, final int index, final String name, final String path) {
         this.base = base;
         this.id = index;
         this.name = name;
         this.path = path;
+        this.mpath = FileUtils.invertMountPrefix(path);
     }
 
     @Override
@@ -56,8 +60,10 @@ public class BookShelfAdapter extends BaseAdapter {
 
         final BookNode node = nodes.get(position);
 
-        holder.textView.setText(StringUtils.cleanupTitle(node.name));
-        base.loadThumbnail(node.path, holder.imageView, R.drawable.book);
+        if (!measuring) {
+            holder.textView.setText(StringUtils.cleanupTitle(node.name));
+            base.loadThumbnail(node.path, holder.imageView, R.drawable.recent_item_book);
+        }
 
         return holder.getView();
     }

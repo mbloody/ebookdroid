@@ -1,11 +1,10 @@
 package org.ebookdroid.ui.viewer.stubs;
 
 import org.ebookdroid.common.settings.types.PageAlign;
-import org.ebookdroid.core.EventDraw;
+import org.ebookdroid.core.EventGLDraw;
 import org.ebookdroid.core.Page;
 import org.ebookdroid.core.ViewState;
 import org.ebookdroid.ui.viewer.IActivityController;
-import org.ebookdroid.ui.viewer.IActivityController.IBookLoadTask;
 import org.ebookdroid.ui.viewer.IView;
 import org.ebookdroid.ui.viewer.IViewController;
 
@@ -13,6 +12,8 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+
+import org.emdev.ui.progress.IProgressIndicator;
 
 public class ViewContollerStub implements IViewController {
 
@@ -23,13 +24,11 @@ public class ViewContollerStub implements IViewController {
     }
 
     @Override
-    public ViewState goToPage(final int page) {
-        return null;
+    public void goToPage(final int page) {
     }
 
     @Override
-    public ViewState goToPage(final int page, final float offsetX, final float offsetY) {
-        return null;
+    public void goToPage(final int page, final float offsetX, final float offsetY) {
     }
 
     @Override
@@ -69,7 +68,7 @@ public class ViewContollerStub implements IViewController {
 
     @Override
     public IActivityController getBase() {
-        return null;
+        return ActivityControllerStub.STUB;
     }
 
     @Override
@@ -115,7 +114,7 @@ public class ViewContollerStub implements IViewController {
     }
 
     @Override
-    public final void init(final IBookLoadTask task) {
+    public final void init(final IProgressIndicator task) {
     }
 
     @Override
@@ -123,11 +122,8 @@ public class ViewContollerStub implements IViewController {
     }
 
     @Override
-    public void drawView(final EventDraw eventDraw) {
-    }
-
-    @Override
-    public boolean isPageVisible(final Page page, final ViewState viewState) {
+    public boolean isPageVisible(final Page page, final ViewState viewState, final RectF outBounds) {
+        viewState.getBounds(page, outBounds);
         return false;
     }
 
@@ -151,5 +147,9 @@ public class ViewContollerStub implements IViewController {
 
     @Override
     public void goToLink(final int pageDocIndex, final RectF targetRect, final boolean addToHistory) {
+    }
+
+    @Override
+    public void drawView(final EventGLDraw eventGLDraw) {
     }
 }

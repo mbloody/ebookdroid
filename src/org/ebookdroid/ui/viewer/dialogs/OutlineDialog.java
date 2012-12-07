@@ -1,7 +1,6 @@
 package org.ebookdroid.ui.viewer.dialogs;
 
 import org.ebookdroid.R;
-import org.ebookdroid.common.settings.SettingsManager;
 import org.ebookdroid.common.settings.books.BookSettings;
 import org.ebookdroid.core.codec.OutlineLink;
 import org.ebookdroid.ui.viewer.IActivityController;
@@ -45,24 +44,33 @@ public class OutlineDialog extends Dialog implements OnItemClickListener {
 
         setContentView(listView);
 
-        final OutlineAdapter adapter = new OutlineAdapter(getContext(), outline);
-
-        listView.setAdapter(adapter);
-
-        final BookSettings bs = SettingsManager.getBookSettings();
+        final BookSettings bs = base.getBookSettings();
+        OutlineLink current = null;
         if (bs != null) {
-            final int current = bs.currentPage.docIndex;
-            for (int i = 0; i < adapter.getCount(); i++) {
-                final OutlineLink item = adapter.getItem(i);
-                if (current <= item.targetPage) {
-                    listView.setItemChecked(i, true);
-                    listView.setSelection(i);
+            final int currentIndex = bs.currentPage.docIndex;
+            for (final OutlineLink item : outline) {
+                int targetIndex = item.targetPage - 1;
+                if (targetIndex <= currentIndex) {
+                    if (targetIndex >= 0) {
+                        current = item;
+                    }
+                } else {
                     break;
                 }
             }
         }
 
+        final OutlineAdapter adapter = new OutlineAdapter(getContext(), base, outline, current);
+
+        listView.setAdapter(adapter);
         listView.setOnItemClickListener(this);
+
+        if (current != null) {
+            int pos = adapter.getItemPosition(current);
+            if (pos != -1) {
+                listView.setSelection(pos);
+            }
+        }
     }
 
     @Override

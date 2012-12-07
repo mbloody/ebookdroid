@@ -1,26 +1,24 @@
 package org.ebookdroid.core.curl;
 
+import android.graphics.PointF;
 import android.util.FloatMath;
 
 /**
  * Inner class used to represent a 2D point.
  */
-class Vector2D {
+public class Vector2D extends PointF {
 
-    public float x, y;
+    public Vector2D() {
+        super();
+    }
 
     public Vector2D(final float x, final float y) {
-        this.x = x;
-        this.y = y;
+        super(x, y);
     }
 
     @Override
     public String toString() {
         return "(" + this.x + "," + this.y + ")";
-    }
-
-    public float length() {
-        return FloatMath.sqrt(x * x + y * y);
     }
 
     public float lengthSquared() {
@@ -69,6 +67,14 @@ class Vector2D {
 
     public float distance(final Vector2D other) {
         return FloatMath.sqrt(distanceSquared(other));
+    }
+
+    public float absdistancex(final Vector2D other) {
+        return Math.abs(this.x - other.x);
+    }
+
+    public float absdistancey(final Vector2D other) {
+        return Math.abs(this.y - other.y);
     }
 
     public float dotProduct(final Vector2D other) {

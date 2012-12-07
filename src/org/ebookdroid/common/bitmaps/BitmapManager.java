@@ -1,38 +1,34 @@
 package org.ebookdroid.common.bitmaps;
 
-import org.ebookdroid.EBookDroidApp;
-import org.ebookdroid.common.log.LogContext;
-
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Color;
-import android.graphics.Rect;
-import android.os.Debug;
 import android.util.SparseArray;
 
-import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
 import java.util.Queue;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 
-import org.emdev.utils.LengthUtils;
+import org.emdev.BaseDroidApp;
+import org.emdev.common.log.LogContext;
+import org.emdev.common.log.LogManager;
+import org.emdev.utils.collections.ArrayDeque;
+import org.emdev.utils.collections.SparseArrayEx;
+import org.emdev.utils.collections.TLIterator;
 
 public class BitmapManager {
 
-    static final LogContext LCTX = LogContext.ROOT.lctx("BitmapManager", false);
+    static final LogContext LCTX = LogManager.root().lctx("BitmapManager", false);
 
     private final static long BITMAP_MEMORY_LIMIT = Runtime.getRuntime().maxMemory() / 2;
 
     private static final int GENERATION_THRESHOLD = 10;
 
-    private static Map<Integer, BitmapRef> used = new ConcurrentHashMap<Integer, BitmapRef>();
+    private static SparseArrayEx<AbstractBitmapRef> used = new SparseArrayEx<AbstractBitmapRef>();
 
-    private static Queue<BitmapRef> pool = new ConcurrentLinkedQueue<BitmapRef>();
+    private static ArrayDeque<AbstractBitmapRef> pool = new ArrayDeque<AbstractBitmapRef>();
 
     private static SparseArray<Bitmap> resources = new SparseArray<Bitmap>();
 
@@ -46,170 +42,153 @@ public class BitmapManager {
 
     private static AtomicLong generation = new AtomicLong();
 
+    private static ReentrantLock lock = new ReentrantLock();
+
     static int partSize = 1 << 7;
-
-    static boolean useEarlyRecycling = false;
-
-    static boolean useBitmapHack = false;
 
     public static Bitmap getResource(final int resourceId) {
         synchronized (resources) {
             Bitmap bitmap = resources.get(resourceId);
             if (bitmap == null || bitmap.isRecycled()) {
-                final Resources resources = EBookDroidApp.context.getResources();
+                final Resources resources = BaseDroidApp.context.getResources();
                 bitmap = BitmapFactory.decodeResource(resources, resourceId);
             }
             return bitmap;
         }
     }
 
-    public static BitmapRef addBitmap(final String name, final Bitmap bitmap) {
-        final BitmapRef ref = new BitmapRef(bitmap, generation.get());
-        used.put(ref.id, ref);
+    public static IBitmapRef addBitmap(final String name, final Bitmap bitmap) {
+        lock.lock();
+        try {
+            final BitmapRef ref = new BitmapRef(bitmap, generation.get());
+            used.append(ref.id, ref);
 
-        created.incrementAndGet();
-        memoryUsed.addAndGet(ref.size);
+            created.incrementAndGet();
+            memoryUsed.addAndGet(ref.size);
 
-        if (LCTX.isDebugEnabled()) {
-            LCTX.d("Added bitmap: [" + ref.id + ", " + name + ", " + ref.width + ", " + ref.height + "], created="
-                    + created + ", reused=" + reused + ", memoryUsed=" + used.size() + "/" + (memoryUsed.get() / 1024)
-                    + "KB" + ", memoryInPool=" + pool.size() + "/" + (memoryPooled.get() / 1024) + "KB");
-        }
-
-        ref.name = name;
-        return ref;
-    }
-
-    public static BitmapRef getBitmap(final String name, final int width, final int height, final Bitmap.Config config) {
-        if (used.isEmpty() && pool.isEmpty()) {
             if (LCTX.isDebugEnabled()) {
-                LCTX.d("!!! Bitmap pool size: " + (BITMAP_MEMORY_LIMIT / 1024) + "KB");
+                LCTX.d("Added bitmap: [" + ref.id + ", " + name + ", " + ref.width + ", " + ref.height + "], created="
+                        + created + ", reused=" + reused + ", memoryUsed=" + used.size() + "/"
+                        + (memoryUsed.get() / 1024) + "KB" + ", memoryInPool=" + pool.size() + "/"
+                        + (memoryPooled.get() / 1024) + "KB");
             }
+
+            ref.name = name;
+            return ref;
+        } finally {
+            lock.unlock();
         }
-
-        final Iterator<BitmapRef> it = pool.iterator();
-        while (it.hasNext()) {
-            final BitmapRef ref = it.next();
-            final Bitmap bmp = ref.bitmap;
-
-            if (bmp != null && bmp.getConfig() == config && ref.width == width && ref.height >= height) {
-                it.remove();
-
-                ref.gen = generation.get();
-                used.put(ref.id, ref);
-
-                reused.incrementAndGet();
-                memoryPooled.addAndGet(-ref.size);
-                memoryUsed.addAndGet(ref.size);
-
-                if (LCTX.isDebugEnabled()) {
-                    LCTX.d("Reuse bitmap: [" + ref.id + ", " + ref.name + " => " + name + ", " + width + ", " + height
-                            + "], created=" + created + ", reused=" + reused + ", memoryUsed=" + used.size() + "/"
-                            + (memoryUsed.get() / 1024) + "KB" + ", memoryInPool=" + pool.size() + "/"
-                            + (memoryPooled.get() / 1024) + "KB");
-                }
-                bmp.eraseColor(Color.CYAN);
-                ref.name = name;
-                return ref;
-            }
-        }
-
-        final BitmapRef ref = new BitmapRef(Bitmap.createBitmap(width, height, config), generation.get());
-        used.put(ref.id, ref);
-
-        created.incrementAndGet();
-        memoryUsed.addAndGet(ref.size);
-
-        if (LCTX.isDebugEnabled()) {
-            LCTX.d("Create bitmap: [" + ref.id + ", " + name + ", " + width + ", " + height + "], created=" + created
-                    + ", reused=" + reused + ", memoryUsed=" + used.size() + "/" + (memoryUsed.get() / 1024) + "KB"
-                    + ", memoryInPool=" + pool.size() + "/" + (memoryPooled.get() / 1024) + "KB");
-        }
-
-        shrinkPool(BITMAP_MEMORY_LIMIT);
-
-        ref.name = name;
-        return ref;
     }
 
-    public static void clear(final String msg) {
-        generation.addAndGet(GENERATION_THRESHOLD * 2);
-        removeOldRefs();
-        release();
-        shrinkPool(0);
-        print(msg, true);
-    }
-
-    private static void print(final String msg, final boolean showRefs) {
-        long sum = 0;
-        for (final BitmapRef ref : pool) {
-            if (!ref.isRecycled()) {
-                if (showRefs) {
-                    LCTX.e("Pool: " + ref);
-                }
-                sum += ref.size;
-            }
-        }
-        for (final BitmapRef ref : used.values()) {
-            if (!ref.isRecycled()) {
-                if (showRefs) {
-                    LCTX.e("Used: " + ref);
-                }
-                sum += ref.size;
-            }
-        }
-        if (showRefs) {
-            LCTX.e(msg + "Bitmaps&NativeHeap : " + sum + "(" + used.size() + " used / " + pool.size() + " pooled)/"
-                    + Debug.getNativeHeapAllocatedSize() + "/" + Debug.getNativeHeapSize());
-        } else {
+    public static IBitmapRef getBitmap(final String name, final int width, final int height, final Bitmap.Config config) {
+        lock.lock();
+        try {
             if (LCTX.isDebugEnabled()) {
-                LCTX.d(msg + "Bitmaps&NativeHeap : " + sum + "(" + used.size() + " used / " + pool.size() + " pooled)/"
-                        + Debug.getNativeHeapAllocatedSize() + "/" + Debug.getNativeHeapSize());
+                if (memoryUsed.get() + memoryPooled.get() == 0) {
+                    LCTX.d("!!! Bitmap pool size: " + (BITMAP_MEMORY_LIMIT / 1024) + "KB");
+                }
             }
-        }
-    }
 
-    @SuppressWarnings("unchecked")
-    public static void release() {
-        generation.incrementAndGet();
-        removeOldRefs();
+            final TLIterator<AbstractBitmapRef> it = pool.iterator();
+            try {
+                while (it.hasNext()) {
+                    final AbstractBitmapRef ref = it.next();
 
-        int count = 0;
-        final int queueBefore = LCTX.isDebugEnabled() ? releasing.size() : 0;
-        while (!releasing.isEmpty()) {
-            final Object ref = releasing.poll();
-            if (ref instanceof BitmapRef) {
-                releaseImpl((BitmapRef) ref);
-                count++;
-            } else if (ref instanceof List) {
-                final List<Bitmaps> list = (List<Bitmaps>) ref;
-                for (final Bitmaps bmp : list) {
-                    final BitmapRef[] bitmaps = bmp.clear();
-                    if (bitmaps != null) {
-                        for (final BitmapRef bitmap : bitmaps) {
-                            if (bitmap != null) {
-                                releaseImpl(bitmap);
-                                count++;
+                    if (!ref.isRecycled() && ref.config == config && ref.width == width && ref.height >= height) {
+                        if (ref.used.compareAndSet(false, true)) {
+                            it.remove();
+
+                            ref.gen = generation.get();
+                            used.append(ref.id, ref);
+
+                            reused.incrementAndGet();
+                            memoryPooled.addAndGet(-ref.size);
+                            memoryUsed.addAndGet(ref.size);
+
+                            if (LCTX.isDebugEnabled()) {
+                                LCTX.d("Reuse bitmap: [" + ref.id + ", " + ref.name + " => " + name + ", " + width
+                                        + ", " + height + "], created=" + created + ", reused=" + reused
+                                        + ", memoryUsed=" + used.size() + "/" + (memoryUsed.get() / 1024) + "KB"
+                                        + ", memoryInPool=" + pool.size() + "/" + (memoryPooled.get() / 1024) + "KB");
+                            }
+                            ref.name = name;
+                            return ref;
+                        } else {
+                            if (LCTX.isDebugEnabled()) {
+                                LCTX.d("Attempt to re-use used bitmap: " + ref);
                             }
                         }
                     }
                 }
-            } else {
-                LCTX.e("Unknown object in release queue: " + ref);
+            } finally {
+                it.release();
             }
-        }
 
-        shrinkPool(BITMAP_MEMORY_LIMIT);
+            final BitmapRef ref = new BitmapRef(Bitmap.createBitmap(width, height, config), generation.get());
+            used.put(ref.id, ref);
 
-        if (LCTX.isDebugEnabled()) {
-            LCTX.d("Return " + count + " bitmap(s) to pool: " + "memoryUsed=" + used.size() + "/"
-                    + (memoryUsed.get() / 1024) + "KB" + ", memoryInPool=" + pool.size() + "/"
-                    + (memoryPooled.get() / 1024) + "KB" + ", releasing queue size " + queueBefore + " => 0");
+            created.incrementAndGet();
+            memoryUsed.addAndGet(ref.size);
+
+            if (LCTX.isDebugEnabled()) {
+                LCTX.d("Create bitmap: [" + ref.id + ", " + name + ", " + width + ", " + height + "], created="
+                        + created + ", reused=" + reused + ", memoryUsed=" + used.size() + "/"
+                        + (memoryUsed.get() / 1024) + "KB" + ", memoryInPool=" + pool.size() + "/"
+                        + (memoryPooled.get() / 1024) + "KB");
+            }
+
+            shrinkPool(BITMAP_MEMORY_LIMIT);
+
+            ref.name = name;
+            return ref;
+        } finally {
+            lock.unlock();
         }
-        print("After  release: ", false);
     }
 
-    public static void release(final BitmapRef ref) {
+    public static void clear(final String msg) {
+        lock.lock();
+        try {
+            generation.addAndGet(GENERATION_THRESHOLD * 2);
+            removeOldRefs();
+            release();
+            shrinkPool(0);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public static void release() {
+        lock.lock();
+        try {
+            generation.incrementAndGet();
+            removeOldRefs();
+
+            int count = 0;
+            final int queueBefore = LCTX.isDebugEnabled() ? releasing.size() : 0;
+            while (!releasing.isEmpty()) {
+                final Object ref = releasing.poll();
+                if (ref instanceof AbstractBitmapRef) {
+                    releaseImpl((AbstractBitmapRef) ref);
+                    count++;
+                } else {
+                    LCTX.e("Unknown object in release queue: " + ref);
+                }
+            }
+
+            shrinkPool(BITMAP_MEMORY_LIMIT);
+
+            if (LCTX.isDebugEnabled()) {
+                LCTX.d("Return " + count + " bitmap(s) to pool: " + "memoryUsed=" + used.size() + "/"
+                        + (memoryUsed.get() / 1024) + "KB" + ", memoryInPool=" + pool.size() + "/"
+                        + (memoryPooled.get() / 1024) + "KB" + ", releasing queue size " + queueBefore + " => 0");
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public static void release(final IBitmapRef ref) {
         if (ref != null) {
             if (LCTX.isDebugEnabled()) {
                 LCTX.d("Adding 1 ref to release queue");
@@ -218,22 +197,19 @@ public class BitmapManager {
         }
     }
 
-    public static void release(final List<Bitmaps> bitmapsToRecycle) {
-        if (LengthUtils.isNotEmpty(bitmapsToRecycle)) {
-            if (LCTX.isDebugEnabled()) {
-                LCTX.d("Adding  list of " + bitmapsToRecycle.size() + " bitmaps to release queue");
-            }
-            releasing.add(new ArrayList<Bitmaps>(bitmapsToRecycle));
-        }
-    }
-
-    static void releaseImpl(final BitmapRef ref) {
+    static void releaseImpl(final AbstractBitmapRef ref) {
         assert ref != null;
-
-        if (null != used.remove(ref.id)) {
-            memoryUsed.addAndGet(-ref.size);
+        if (ref.used.compareAndSet(true, false)) {
+            if (used.get(ref.id, null) == ref) {
+                used.remove(ref.id);
+                memoryUsed.addAndGet(-ref.size);
+            } else {
+                LCTX.e("The bitmap " + ref + " not found in used ones");
+            }
         } else {
-            LCTX.e("The bitmap " + ref + " not found in used ones");
+            if (LCTX.isDebugEnabled()) {
+                LCTX.d("Attempt to release unused bitmap");
+            }
         }
 
         pool.add(ref);
@@ -243,9 +219,9 @@ public class BitmapManager {
     private static void removeOldRefs() {
         final long gen = generation.get();
         int recycled = 0;
-        final Iterator<BitmapRef> it = pool.iterator();
+        final Iterator<AbstractBitmapRef> it = pool.iterator();
         while (it.hasNext()) {
-            final BitmapRef ref = it.next();
+            final AbstractBitmapRef ref = it.next();
             if (gen - ref.gen > GENERATION_THRESHOLD) {
                 it.remove();
                 ref.recycle();
@@ -265,7 +241,7 @@ public class BitmapManager {
     private static void shrinkPool(final long limit) {
         int recycled = 0;
         while (memoryPooled.get() + memoryUsed.get() > limit && !pool.isEmpty()) {
-            final BitmapRef ref = pool.poll();
+            final AbstractBitmapRef ref = pool.poll();
             if (ref != null) {
                 ref.recycle();
                 memoryPooled.addAndGet(-ref.size);
@@ -286,32 +262,12 @@ public class BitmapManager {
         return getPixelSizeInBytes(config) * width * height;
     }
 
-    public static int getBitmapBufferSize(final Bitmap parentBitmap, final Rect childSize) {
-        int bytes = 4;
-        if (parentBitmap != null) {
-            bytes = BitmapManager.getPixelSizeInBytes(parentBitmap.getConfig());
-        }
-        return bytes * childSize.width() * childSize.height();
-    }
-
     public static int getPartSize() {
         return partSize;
     }
 
     public static void setPartSize(final int partSize) {
         BitmapManager.partSize = partSize;
-    }
-
-    public static boolean isUseEarlyRecycling() {
-        return useEarlyRecycling;
-    }
-
-    public static void setUseEarlyRecycling(final boolean useEarlyRecycling) {
-        BitmapManager.useEarlyRecycling = useEarlyRecycling;
-    }
-
-    public static void setUseBitmapHack(final boolean useBitmapHack) {
-        BitmapManager.useBitmapHack = useBitmapHack;
     }
 
     public static int getPixelSizeInBytes(final Bitmap.Config config) {

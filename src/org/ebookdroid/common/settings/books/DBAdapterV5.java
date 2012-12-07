@@ -18,8 +18,6 @@ class DBAdapterV5 extends DBAdapterV4 {
 
     public static final long F_CROP_PAGES = 1 << 1;
 
-    public static final float OFFSET_FACTOR = 100000.0f;
-
     public static final String DB_BOOK_CREATE = "create table book_settings ("
     // Book file path
             + "book varchar(1024) primary key, "
@@ -65,7 +63,7 @@ class DBAdapterV5 extends DBAdapterV4 {
     }
 
     @Override
-    public Map<String, BookSettings> getBookSettings(final boolean all) {
+    public Map<String, BookSettings> getRecentBooks(final boolean all) {
         return getBookSettings(DB_BOOK_GET_ALL, all);
     }
 
@@ -76,8 +74,6 @@ class DBAdapterV5 extends DBAdapterV4 {
 
     @Override
     protected void storeBookSettings(final BookSettings bs, final SQLiteDatabase db) {
-        bs.lastUpdated = System.currentTimeMillis();
-
         final Object[] args = new Object[] {
                 // File name
                 bs.fileName,

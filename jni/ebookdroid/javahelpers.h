@@ -3,6 +3,8 @@
 
 #include <jni.h>
 
+#ifdef __cplusplus
+
 class ArrayListHelper
 {
 private:
@@ -220,5 +222,79 @@ public:
     }
 
 };
+
+#else /* not __cplusplus */
+
+typedef struct CharacterHelper_s CharacterHelper;
+typedef struct ArrayListHelper_s ArrayListHelper;
+typedef struct PageTextBoxHelper_s PageTextBoxHelper;
+typedef struct RectFHelper_s RectFHelper;
+
+struct CharacterHelper_s
+{
+    JNIEnv* jenv;
+    jclass cls;
+    jmethodID midToLowerCase;
+    int valid;
+};
+
+int CharacterHelper_init(CharacterHelper* that, JNIEnv* env);
+
+unsigned short CharacterHelper_toLowerCase(CharacterHelper* that, unsigned short ch);
+
+struct ArrayListHelper_s
+{
+    JNIEnv* jenv;
+    jclass cls;
+    jmethodID cid;
+    jmethodID midAdd;
+    int valid;
+};
+
+int ArrayListHelper_init(ArrayListHelper* that, JNIEnv* env);
+
+jobject ArrayListHelper_create(ArrayListHelper* that);
+
+void ArrayListHelper_add(ArrayListHelper* that, jobject arrayList, jobject obj);
+
+struct PageTextBoxHelper_s
+{
+    JNIEnv* jenv;
+    jclass cls;
+    jmethodID cid;
+    jfieldID fidLeft;
+    jfieldID fidTop;
+    jfieldID fidRight;
+    jfieldID fidBottom;
+    jfieldID fidText;
+    int valid;
+};
+
+int PageTextBoxHelper_init(PageTextBoxHelper* that, JNIEnv* env);
+
+jobject PageTextBoxHelper_create(PageTextBoxHelper* that);
+
+jobject PageTextBoxHelper_setRect(PageTextBoxHelper* that, jobject ptb, const int* coords);
+
+jobject PageTextBoxHelper_setText(PageTextBoxHelper* that, jobject ptb, jstring text);
+
+struct RectFHelper_s
+{
+    JNIEnv* jenv;
+    jclass cls;
+    jmethodID cid;
+    jfieldID fidLeft;
+    jfieldID fidTop;
+    jfieldID fidRight;
+    jfieldID fidBottom;
+    int valid;
+};
+
+int RectFHelper_init(RectFHelper* that, JNIEnv* env);
+
+jobject RectFHelper_create(RectFHelper* that);
+
+jobject RectFHelper_setRectF(RectFHelper* that, jobject rectf, const float* coords);
+#endif
 
 #endif
